@@ -1,81 +1,65 @@
 import runpod
+import os
+import torch
 import cv2
 import numpy as np
-import torch
-import torchvision
-import os
-import base64
+from urllib.request import urlopen
 from PIL import Image
 import io
-import urllib.request
-from utils import preprocess_image, determine_cell_position
+import json
 from model import PanelDefectDetector
+from utils import preprocess_image, determine_cell_position
+import traceback
 
-# Modeli global olarak yükle
+# Model yükleme için global değişken
 model = None
 
 def load_model():
-    """Solar panel hata tespit modelini yükler"""
+    """Model nesnesini yükle veya mevcut nesneyi döndür"""
     global model
     if model is None:
-        print("Model yükleniyor...")
-        
-        # Model klasörü var mı kontrol et, yoksa oluştur
-        if not os.path.exists("models"):
-            os.makedirs("models")
-        
-        # Model dosyası var mı kontrol et, yoksa indir
-        if not os.path.exists("models/panel_detector.pt"):
-            print("Model dosyası indiriliyor...")
-            # Varsayılan olarak YOLOv5 modelini kullanıyoruz
-            # Gerçek uygulamada kendi eğitilmiş modelinizi kullanmalısınız
-            urllib.request.urlretrieve(
-                "https://github.com/ultralytics/yolov5/releases/download/v6.1/yolov5s.pt", 
-                "models/panel_detector.pt"
-            )
-        
-        # Modeli yükle - gerçek solar panel projesi için özelleştirilmiş model kullanılmalı
-        model = PanelDefectDetector("models/panel_detector.pt")
-        print("Model başarıyla yüklendi!")
-    
+        try:
+            model_path = os.environ.get('MODEL_PATH', '/app/models/2712.pt')
+            print(f"Model yükleniyor: {model_path}")
+            model = PanelDefectDetector(model_path)
+            print("Model başarıyla yüklendi")
+        except Exception as e:
+            print(f"Model yükleme hatası: {str(e)}")
+            traceback.print_exc()
+            raise e
     return model
 
-def handler(event):
-    """RunPod için işleyici fonksiyon"""
-    
-    # Modeli yükle
-    model = load_model()
-    
-    # Girdi verisini al
-    input_data = event.get("input", {})
-    
-    # URL veya Base64 formatında görüntü alabilir
-    image_url = input_data.get("image_url", "")
-    image_base64 = input_data.get("image_base64", "")
-    project_id = input_data.get("project_id", None)
-    image_id = input_data.get("image_id", None)
-    
+def analyze_image(image_url, image_id=None, project_id=None):
+    """Görüntüyü analiz et ve hataları tespit et"""
     try:
-        # Görüntüyü al ve işle
-        if image_url:
-            print(f"URL'den görüntü işleniyor: {image_url}")
-            with urllib.request.urlopen(image_url) as response:
-                image_data = response.read()
-                img = Image.open(io.BytesIO(image_data))
-        elif image_base64:
-            print("Base64 görüntü işleniyor")
-            image_data = base64.b64decode(image_base64)
-            img = Image.open(io.BytesIO(image_data))
-        else:
-            return {"error": "Görüntü URL'si veya Base64 verisi gereklidir"}
+        print(f"Görüntü indiriliyor: {image_url}")
+        # URL'den görüntüyü indir
+        try:
+            response = urlopen(image_url)
+            img_data = response.read()
+            img = Image.open(io.BytesIO(img_data))
+            print(f"Görüntü indirildi: {img.width}x{img.height}")
+        except Exception as e:
+            error_msg = f"Görüntü indirme hatası: {str(e)}"
+            print(error_msg)
+            return {"error": error_msg}
         
         # Görüntüyü ön işle
-        processed_img = preprocess_image(img)
+        img = preprocess_image(img)
         
-        # Hata tespiti yap
-        defects = model.detect_defects(processed_img)
+        # Modeli yükle
+        model = load_model()
+        
+        # Hataları tespit et
+        print("Görüntü analiz ediliyor...")
+        defects = model.detect_defects(img)
+        print(f"Tespit edilen hata sayısı: {len(defects)}")
         
         # Her bir hata için hücre konumunu belirle
+        width, height = img.size
+        print(f"Görüntü boyutu: {width}x{height}")
+        
+        # Sonuçları düzenle
         results = []
         for defect in defects:
             defect_type = defect["class_name"]
@@ -86,35 +70,83 @@ def handler(event):
             center_x = (bbox[0] + bbox[2]) / 2
             center_y = (bbox[1] + bbox[3]) / 2
             
-            # Hücre konumunu belirle
-            cell_position = determine_cell_position(center_x, center_y, img.width, img.height)
+            # 12'lik grid için hücre konumunu belirle (A1-F24)
+            cell_position = determine_cell_position(center_x, center_y, width, height)
             
-            results.append({
+            # Sonucu ekle
+            result = {
                 "class_name": defect_type,
                 "confidence": confidence,
                 "bbox": bbox,
                 "cell_position": cell_position,
-                "image_id": image_id,
-                "project_id": project_id
-            })
-        
-        return {
-            "status": "success",
-            "defects": results,
-            "total_defects": len(results),
-            "image_info": {
-                "width": img.width,
-                "height": img.height,
-                "image_id": image_id,
-                "project_id": project_id
+                "center": [center_x, center_y]
             }
+            
+            # İsteğe bağlı alanları ekle
+            if image_id is not None:
+                result["image_id"] = image_id
+            if project_id is not None:
+                result["project_id"] = project_id
+                
+            results.append(result)
+        
+        # İstatistikleri hesapla
+        defect_counts = {}
+        for defect in results:
+            defect_type = defect["class_name"]
+            if defect_type in defect_counts:
+                defect_counts[defect_type] += 1
+            else:
+                defect_counts[defect_type] = 1
+        
+        # Sonuç özeti ve istatistikler
+        return {
+            "defects": results,
+            "statistics": {
+                "total_defects": len(results),
+                "defect_counts": defect_counts,
+                "image_dimensions": {"width": width, "height": height}
+            },
+            "image_id": image_id,
+            "project_id": project_id
         }
         
     except Exception as e:
-        import traceback
-        traceback_str = traceback.format_exc()
-        print(f"Hata oluştu: {str(e)}\n{traceback_str}")
-        return {"error": str(e), "traceback": traceback_str}
+        error_msg = f"Görüntü analizi sırasında hata: {str(e)}"
+        print(error_msg)
+        traceback.print_exc()
+        return {"error": error_msg}
 
-# RunPod entry point
-runpod.serverless.start({"handler": handler})
+def handler(event):
+    """RunPod için işleyici fonksiyon"""
+    try:
+        print(f"İstek alındı: {json.dumps(event)}")
+        
+        # Girdi verisini al
+        input_data = event.get("input", {})
+        
+        # Gerekli parametreleri kontrol et
+        if not input_data:
+            return {"error": "Girdi verisi gereklidir"}
+        
+        # URL veya Base64 formatında görüntü alabilir
+        image_url = input_data.get("image_url", "")
+        image_id = input_data.get("image_id", None)
+        project_id = input_data.get("project_id", None)
+        
+        if not image_url:
+            return {"error": "image_url parametresi gereklidir"}
+        
+        # Görüntüyü analiz et
+        return analyze_image(image_url, image_id, project_id)
+        
+    except Exception as e:
+        error_msg = f"İstek işleme hatası: {str(e)}"
+        print(error_msg)
+        traceback.print_exc()
+        return {"error": error_msg}
+
+# RunPod başlangıç noktası
+if __name__ == "__main__":
+    print("RunPod handler başlatılıyor...")
+    runpod.serverless.start({"handler": handler}) 
