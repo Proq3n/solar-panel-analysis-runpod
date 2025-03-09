@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# MODEL_PATH çevre değişkenini ayarla
+ENV MODEL_PATH="/app/models/2712.pt"
+
 # Python bağımlılıkları
 COPY requirements.txt /app/
 RUN pip3 install --no-cache-dir -r requirements.txt
