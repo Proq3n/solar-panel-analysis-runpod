@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     git \
     wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Python bağımlılıkları
@@ -21,9 +22,25 @@ COPY handler.py /app/
 COPY model.py /app/
 COPY utils.py /app/
 
-# YOLOv5 modelini indir 
-RUN mkdir -p /app/models && \
-    wget -q https://github.com/ultralytics/yolov5/releases/download/v6.1/yolov5s.pt -O /app/models/yolov5s.pt
+# Model klasörünü oluştur
+RUN mkdir -p /app/models
 
-# RunPod için giriş noktası
-CMD ["python3", "handler.py"]
+# Modeli çalışma zamanında indirmek için özel bir betik oluştur
+RUN echo '#!/bin/bash\n\
+MODEL_URL="${MODEL_URL:-http://173.212.235.138/models/2712.pt}"\n\
+MODEL_PATH="/app/models/2712.pt"\n\
+\n\
+if [ ! -f "$MODEL_PATH" ]; then\n\
+    echo "Model indiriliyor: $MODEL_URL -> $MODEL_PATH"\n\
+    curl -L -o "$MODEL_PATH" "$MODEL_URL" || wget -O "$MODEL_PATH" "$MODEL_URL"\n\
+    echo "Model indirildi."\n\
+else\n\
+    echo "Model zaten var: $MODEL_PATH"\n\
+fi\n\
+\n\
+# Ana uygulamayı başlat\n\
+exec python3 handler.py\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Çalışma zamanında modeli indirme ve uygulamayı başlatma
+CMD ["/app/start.sh"] 
