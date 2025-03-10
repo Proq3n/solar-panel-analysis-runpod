@@ -7,17 +7,15 @@ RUN apt-get update && apt-get install -y \
     libgl1-mesa-glx \
     libglib2.0-0 \
     python3-pip \
-    git \
     wget \
     curl \
-    file \
     && rm -rf /var/lib/apt/lists/*
 
 # MODEL_PATH çevre değişkenini ayarla
 ENV MODEL_PATH="/app/models/2712.pt"
 
-# Python bağımlılıkları (sadece temel olanlar)
-RUN pip3 install runpod Pillow numpy opencv-python-headless
+# Python bağımlılıkları (sadece gerekli olanlar)
+RUN pip3 install runpod Pillow opencv-python-headless torch==2.0.0
 
 # Uygulama kodlarını kopyala
 COPY handler.py /app/
@@ -27,10 +25,10 @@ COPY utils.py /app/
 # Model klasörünü oluştur
 RUN mkdir -p /app/models
 
-# Basitleştirilmiş başlatma betiği - sadece kendi modelimizi kullanacak
+# Model indirme ve başlatma betiği
 RUN echo '#!/bin/bash\n\
 \n\
-# Ana model dosyasının yolunu tanımla\n\
+# Model dosyası yolu\n\
 MODEL_URL="${MODEL_URL:-https://github.com/Proq3n/solar-panel-analysis-runpod/raw/main/2712.pt}"\n\
 MODEL_PATH="/app/models/2712.pt"\n\
 \n\
@@ -39,16 +37,14 @@ curl -L -o "$MODEL_PATH" "$MODEL_URL" || wget -O "$MODEL_PATH" "$MODEL_URL"\n\
 \n\
 # Model dosyası kontrolü\n\
 if [ ! -f "$MODEL_PATH" ] || [ ! -s "$MODEL_PATH" ]; then\n\
-    echo "Model indirilemedi veya dosya boş!"\n\
-    echo "Basit test modeli ile devam edilecek..."\n\
-else\n\
-    echo "Model dosyası hazır: $MODEL_PATH ($(ls -lh $MODEL_PATH | awk \"{print \\$5}\") byte)"\n\
+    echo "Model indirilemedi! Uygulama çalışamayacak."\n\
+    exit 1\n\
 fi\n\
 \n\
-# Ortam hazır, uygulamayı başlat\n\
+echo "Model dosyası yüklendi: $MODEL_PATH"\n\
 echo "RunPod servisi başlatılıyor..."\n\
 exec python3 -u handler.py\n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
-# Çalışma zamanında modeli indirme ve uygulamayı başlatma
+# Servisi başlat
 CMD ["/app/start.sh"] 
