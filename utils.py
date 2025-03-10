@@ -107,3 +107,19 @@ def determine_cell_position(x, y, img_width, img_height):
     else:
         # Beklenmeyen bir dilim indeksi durumunda bir hata mesajı döndür
         return f"Unknown-{slice_index}-{cell_x}-{cell_y}" 
+
+
+# RunPod ve YOLOv5 entegrasyonu için ihtiyaç duyulan decorator sınıfı
+class TryExcept(object):
+    """
+    TryExcept decorator sınıfı - hataları yakalayıp işler
+    """
+    def __init__(self, func):
+        self.func = func
+    
+    def __call__(self, *args, **kwargs):
+        try:
+            return self.func(*args, **kwargs)
+        except Exception as e:
+            print(f"Error in {self.func.__name__}: {e}")
+            return None 
