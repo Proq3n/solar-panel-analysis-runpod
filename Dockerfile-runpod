@@ -44,7 +44,7 @@ echo "Çalışma dizini: $(pwd)"\n\
 # Model dosyasını indir\n\
 if [ ! -f ${MODEL_PATH} ]; then\n\
     echo "Model indiriliyor..."\n\
-    wget -q -O ${MODEL_PATH} https://github.com/atagl/solar-model/raw/main/2712.pt\n\
+    wget -q -O ${MODEL_PATH} https://raw.githubusercontent.com/Proq3n/solar-panel-analysis-runpod/305d4577bd68da5255bd703238cb5fd9b84b46ae/2712.pt\n\
     \n\
     # Model dosyasının indirilip indirilmediğini kontrol et\n\
     if [ -f ${MODEL_PATH} ]; then\n\
