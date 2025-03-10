@@ -27,7 +27,7 @@ RUN mkdir -p /app/models
 
 # Modeli çalışma zamanında indirmek için özel bir betik oluştur
 RUN echo '#!/bin/bash\n\
-MODEL_URL="${MODEL_URL:-http://173.212.235.138/models/2712.pt}"\n\
+MODEL_URL="${MODEL_URL:-https://github.com/Proq3n/solar-panel-analysis-runpod/raw/main/2712.pt}"\n\
 MODEL_PATH="/app/models/2712.pt"\n\
 \n\
 if [ ! -f "$MODEL_PATH" ]; then\n\
