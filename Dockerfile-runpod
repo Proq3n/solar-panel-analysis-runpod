@@ -13,15 +13,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     python3-dev \
     build-essential \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    file \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Python bağımlılıklarını yükle
-RUN pip3 install --no-cache-dir \
-    runpod==0.13.0 \
-    Pillow==9.5.0 \
-    numpy==1.24.3 \
-    opencv-python-headless==4.7.0.72
+# Python bağımlılıklarını ayrı ayrı yükle
+RUN pip3 install --no-cache-dir runpod
+RUN pip3 install --no-cache-dir Pillow
+RUN pip3 install --no-cache-dir numpy
+# OpenCV için gerekli bağımlılıkları yükle
+RUN pip3 install --no-cache-dir opencv-python-headless --no-deps
+RUN pip3 install --no-cache-dir matplotlib
 
 # Uygulama dosyalarını kopyala
 COPY handler.py model.py utils.py /app/
