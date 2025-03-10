@@ -20,25 +20,10 @@ class PanelDefectDetector:
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model dosyası bulunamadı: {model_path}")
         
-        # Doğrudan PyTorch ile basitçe modeli yükle
-        try:
-            self.model = torch.load(model_path, map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
-            self.model_type = "custom"
-            print("Model başarıyla yüklendi")
-        except Exception as e:
-            print(f"Model yükleme hatası: {str(e)}")
-            # Hata durumunda basit bir model oluştur (sadece test için)
-            print("Test için geçici model oluşturuluyor...")
-            # PyTorch modeli dönüştüren basit bir sınıf
-            class SimpleModel:
-                def __init__(self):
-                    pass
-                def __call__(self, x):
-                    # Rastgele sonuçlar döndür - sadece test için
-                    return [{"bbox": [100, 100, 200, 200], "class": 0, "confidence": 0.8}]
-            self.model = SimpleModel()
-            self.model_type = "simple_test"
-            print("Test modeli oluşturuldu")
+        # Doğrudan PyTorch ile modelimizi yükle
+        self.model = torch.load(model_path, map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+        self.model_type = "custom"
+        print("Model başarıyla yüklendi")
         
         # Solar panel hata türleri
         self.defect_classes = [
@@ -85,52 +70,45 @@ class PanelDefectDetector:
                 # Zaten tensor ise
                 img_tensor = image
             
-            # Eğer model test modeli ise
-            if self.model_type == "simple_test":
-                # Test için sabit sonuçlar döndür
-                defects = []
-                # Örnek tespit sonuçları
-                test_results = [
-                    {"bbox": [100, 100, 200, 200], "class": 0, "confidence": 0.85},
-                    {"bbox": [300, 300, 400, 400], "class": 2, "confidence": 0.75}
-                ]
-                
-                for res in test_results:
-                    class_id = res["class"]
-                    class_name = self.defect_classes[class_id] if class_id < len(self.defect_classes) else "Bilinmeyen Hata"
-                    
-                    defects.append({
-                        "class_name": class_name,
-                        "confidence": res["confidence"],
-                        "bbox": res["bbox"]
-                    })
-                
-                return defects
-                
-            # Gerçek modelle tahmin yap
+            # Modelle tahmin yap
             with torch.no_grad():
                 results = self.model(img_tensor)
             
-            # Sonuçları işle (model çıktı formatına göre düzenlenebilir)
-            # NOT: Bu kısım modelin çıktı formatına göre düzenlenmelidir
+            # Sonuçları işle
             defects = []
             
-            # Not: Bu örnektir, gerçek model çıktısına göre uyarlayın
-            if isinstance(results, list) and len(results) > 0:
-                # Modele özel sonuç işleme
+            # Model çıktısına göre sonuçları işle
+            # Model çıktı formatına göre düzenlenebilir
+            if hasattr(results, 'xyxy'):
+                # YOLOv5 benzeri çıktı
+                for i in range(len(results.xyxy[0])):
+                    box = results.xyxy[0][i]
+                    confidence = float(box[4])
+                    if confidence >= self.confidence_threshold:
+                        class_id = int(box[5])
+                        class_name = self.defect_classes[class_id] if class_id < len(self.defect_classes) else "Bilinmeyen Hata"
+                        
+                        defects.append({
+                            "class_name": class_name,
+                            "confidence": confidence,
+                            "bbox": [float(box[0]), float(box[1]), float(box[2]), float(box[3])]
+                        })
+            elif isinstance(results, list):
+                # Liste formatında sonuçlar
                 for detection in results:
-                    if isinstance(detection, dict) and 'confidence' in detection:
-                        confidence = detection.get('confidence', 0)
-                        if confidence >= self.confidence_threshold:
-                            class_id = detection.get('class', 0)
-                            class_name = self.defect_classes[class_id] if class_id < len(self.defect_classes) else "Bilinmeyen Hata"
-                            bbox = detection.get('bbox', [0, 0, 0, 0])
-                            
-                            defects.append({
-                                "class_name": class_name,
-                                "confidence": confidence,
-                                "bbox": bbox
-                            })
+                    confidence = detection.get('confidence', 0)
+                    if confidence >= self.confidence_threshold:
+                        class_id = detection.get('class', 0)
+                        class_name = self.defect_classes[class_id] if class_id < len(self.defect_classes) else "Bilinmeyen Hata"
+                        
+                        defects.append({
+                            "class_name": class_name,
+                            "confidence": confidence,
+                            "bbox": detection.get('bbox', [0, 0, 0, 0])
+                        })
+            else:
+                # Diğer model formatları
+                print(f"Uyarı: Model çıktı formatı bilinmiyor: {type(results)}")
             
             return defects
                 
