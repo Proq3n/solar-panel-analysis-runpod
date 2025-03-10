@@ -1,152 +1,138 @@
-import runpod
 import os
-import torch
-import cv2
-import numpy as np
-from urllib.request import urlopen
+import runpod
+import requests
 from PIL import Image
-import io
+from io import BytesIO
+import torch
 import json
-from model import PanelDefectDetector
-from utils import preprocess_image, determine_cell_position
-import traceback
 
-# Model yükleme için global değişken
-model = None
+# Model sınıfını içe aktar
+from model import PanelDefectDetector
+from utils import determine_cell_position
+
+# Global model örneği
+MODEL = None
 
 def load_model():
-    """Model nesnesini yükle veya mevcut nesneyi döndür"""
-    global model
-    if model is None:
-        try:
-            model_path = os.environ.get('MODEL_PATH', '/app/models/2712.pt')
-            print(f"Model yükleniyor: {model_path}")
-            model = PanelDefectDetector(model_path)
-            print("Model başarıyla yüklendi")
-        except Exception as e:
-            print(f"Model yükleme hatası: {str(e)}")
-            traceback.print_exc()
-            raise e
-    return model
+    """Model örneğini yükle veya mevcut olanı döndür"""
+    global MODEL
+    
+    if MODEL is None:
+        model_path = os.environ.get('MODEL_PATH', '/app/models/2712.pt')
+        print(f"Model yükleniyor: {model_path}")
+        MODEL = PanelDefectDetector(model_path)
+    return MODEL
 
-def analyze_image(image_url, image_id=None, project_id=None):
+def download_image(url):
+    """URL'den görüntü indirme"""
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()  # 4xx/5xx hataları için exception fırlat
+        
+        # BytesIO nesnesinden PIL Image olarak aç
+        img = Image.open(BytesIO(response.content))
+        print(f"Görüntü indirildi: {img.width}x{img.height}")
+        return img
+    except Exception as e:
+        print(f"Görüntü indirme hatası: {str(e)}")
+        raise e
+
+def analyze_image(event):
     """Görüntüyü analiz et ve hataları tespit et"""
     try:
-        print(f"Görüntü indiriliyor: {image_url}")
-        # URL'den görüntüyü indir
-        try:
-            response = urlopen(image_url)
-            img_data = response.read()
-            img = Image.open(io.BytesIO(img_data))
-            print(f"Görüntü indirildi: {img.width}x{img.height}")
-        except Exception as e:
-            error_msg = f"Görüntü indirme hatası: {str(e)}"
-            print(error_msg)
-            return {"error": error_msg}
-        
-        # Görüntüyü ön işle
-        img = preprocess_image(img)
-        
         # Modeli yükle
         model = load_model()
         
-        # Hataları tespit et
-        print("Görüntü analiz ediliyor...")
-        defects = model.detect_defects(img)
-        print(f"Tespit edilen hata sayısı: {len(defects)}")
+        # İstek parametrelerini al
+        input_data = event.get("input", {})
+        image_url = input_data.get("image_url")
+        project_id = input_data.get("project_id")
+        image_id = input_data.get("image_id")
         
-        # Her bir hata için hücre konumunu belirle
-        width, height = img.size
-        print(f"Görüntü boyutu: {width}x{height}")
-        
-        # Sonuçları düzenle
-        results = []
-        for defect in defects:
-            defect_type = defect["class_name"]
-            confidence = defect["confidence"]
-            bbox = defect["bbox"]  # [x1, y1, x2, y2]
+        if not image_url:
+            return {"error": "image_url parametresi gerekli"}
             
-            # Merkez noktayı hesapla
+        print(f"Görüntü indiriliyor: {image_url}")
+        
+        # Görüntüyü indir
+        image = download_image(image_url)
+        
+        # Görüntüyü analiz et ve hataları bul
+        print("Görüntü analiz ediliyor...")
+        detections = model.detect_defects(image)
+        print(f"Tespit edilen hata sayısı: {len(detections)}")
+        
+        # Görüntü boyutları (hücre konumu hesaplama için)
+        img_width, img_height = image.size
+        
+        # Her tespit için hücre konumunu hesapla
+        defects_with_positions = []
+        for defect in detections:
+            bbox = defect["bbox"]
+            
+            # Bounding box'ın merkez koordinatları
             center_x = (bbox[0] + bbox[2]) / 2
             center_y = (bbox[1] + bbox[3]) / 2
             
-            # 12'lik grid için hücre konumunu belirle (A1-F24)
-            cell_position = determine_cell_position(center_x, center_y, width, height)
+            # Hücre konumunu belirle (A1, B2, C3, vb.)
+            cell_position = determine_cell_position(center_x, center_y, img_width, img_height)
             
-            # Sonucu ekle
-            result = {
-                "class_name": defect_type,
-                "confidence": confidence,
-                "bbox": bbox,
-                "cell_position": cell_position,
-                "center": [center_x, center_y]
-            }
+            # Hücre konumunu ekleyen yeni nesne oluştur
+            defect_with_position = defect.copy()
+            defect_with_position["cell_position"] = cell_position
+            defect_with_position["project_id"] = project_id
+            defect_with_position["image_id"] = image_id
             
-            # İsteğe bağlı alanları ekle
-            if image_id is not None:
-                result["image_id"] = image_id
-            if project_id is not None:
-                result["project_id"] = project_id
-                
-            results.append(result)
+            # Defects listesine ekle
+            defects_with_positions.append(defect_with_position)
         
-        # İstatistikleri hesapla
-        defect_counts = {}
-        for defect in results:
-            defect_type = defect["class_name"]
-            if defect_type in defect_counts:
-                defect_counts[defect_type] += 1
-            else:
-                defect_counts[defect_type] = 1
-        
-        # Sonuç özeti ve istatistikler
+        # Sonuçları döndür
         return {
-            "defects": results,
-            "statistics": {
-                "total_defects": len(results),
-                "defect_counts": defect_counts,
-                "image_dimensions": {"width": width, "height": height}
-            },
-            "image_id": image_id,
-            "project_id": project_id
+            "defects": defects_with_positions,
+            "total_defects": len(defects_with_positions),
+            "image_info": {
+                "width": img_width,
+                "height": img_height,
+                "image_id": image_id,
+                "project_id": project_id
+            }
         }
         
     except Exception as e:
-        error_msg = f"Görüntü analizi sırasında hata: {str(e)}"
-        print(error_msg)
+        print(f"Görüntü analizi sırasında hata: {str(e)}")
+        import traceback
         traceback.print_exc()
-        return {"error": error_msg}
+        return {"error": str(e)}
 
+# RunPod handler
 def handler(event):
-    """RunPod için işleyici fonksiyon"""
+    print("RunPod handler başlatılıyor...")
+    
     try:
-        print(f"İstek alındı: {json.dumps(event)}")
+        # Analyzer'i çağır
+        result = analyze_image(event)
         
-        # Girdi verisini al
-        input_data = event.get("input", {})
+        if "error" in result:
+            # Hata durumunda 400 durum kodu döndür
+            return {
+                "error": result["error"],
+                "status_code": 400
+            }
         
-        # Gerekli parametreleri kontrol et
-        if not input_data:
-            return {"error": "Girdi verisi gereklidir"}
-        
-        # URL veya Base64 formatında görüntü alabilir
-        image_url = input_data.get("image_url", "")
-        image_id = input_data.get("image_id", None)
-        project_id = input_data.get("project_id", None)
-        
-        if not image_url:
-            return {"error": "image_url parametresi gereklidir"}
-        
-        # Görüntüyü analiz et
-        return analyze_image(image_url, image_id, project_id)
+        # Başarılı durumda sonuçları döndür
+        return {
+            "status_code": 200,
+            "output": result
+        }
         
     except Exception as e:
-        error_msg = f"İstek işleme hatası: {str(e)}"
-        print(error_msg)
+        print(f"İşlem sırasında beklenmeyen hata: {str(e)}")
+        import traceback
         traceback.print_exc()
-        return {"error": error_msg}
+        return {
+            "error": str(e),
+            "status_code": 500
+        }
 
-# RunPod başlangıç noktası
-if __name__ == "__main__":
-    print("RunPod handler başlatılıyor...")
-    runpod.serverless.start({"handler": handler}) 
+# RunPod API bağlantısı
+runpod.serverless.start({"handler": handler}) 
