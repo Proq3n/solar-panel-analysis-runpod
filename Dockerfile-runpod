@@ -1,50 +1,74 @@
 FROM pytorch/pytorch:2.0.0-cuda11.7-cudnn8-runtime
 
+# Çalışma dizinini ayarla
 WORKDIR /app
 
-# Temel bağımlılıklar
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    python3-pip \
+# Ortam değişkenlerini ayarla
+ENV MODEL_PATH=/app/models/2712.pt
+ENV PYTHONUNBUFFERED=1
+
+# Gerekli paketleri yükle
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
+    python3-dev \
+    build-essential \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# MODEL_PATH çevre değişkenini ayarla
-ENV MODEL_PATH="/app/models/2712.pt"
+# Python bağımlılıklarını yükle
+RUN pip3 install --no-cache-dir \
+    runpod==0.13.0 \
+    Pillow==9.5.0 \
+    numpy==1.24.3 \
+    opencv-python-headless==4.7.0.72
 
-# Python bağımlılıkları (sadece gerekli olanlar)
-RUN pip3 install runpod Pillow opencv-python-headless torch==2.0.0
+# Uygulama dosyalarını kopyala
+COPY handler.py model.py utils.py /app/
 
-# Uygulama kodlarını kopyala
-COPY handler.py /app/
-COPY model.py /app/
-COPY utils.py /app/
-
-# Model klasörünü oluştur
+# Model dizini oluştur
 RUN mkdir -p /app/models
 
-# Model indirme ve başlatma betiği
+# Model indirme ve başlatma scripti oluştur
 RUN echo '#!/bin/bash\n\
+set -e\n\
 \n\
-# Model dosyası yolu\n\
-MODEL_URL="${MODEL_URL:-https://github.com/Proq3n/solar-panel-analysis-runpod/raw/main/2712.pt}"\n\
-MODEL_PATH="/app/models/2712.pt"\n\
+echo "Python versiyonu:"\n\
+python3 --version\n\
 \n\
-echo "Model indiriliyor: $MODEL_URL -> $MODEL_PATH"\n\
-curl -L -o "$MODEL_PATH" "$MODEL_URL" || wget -O "$MODEL_PATH" "$MODEL_URL"\n\
+echo "Yüklü pip paketleri:"\n\
+pip3 list\n\
 \n\
-# Model dosyası kontrolü\n\
-if [ ! -f "$MODEL_PATH" ] || [ ! -s "$MODEL_PATH" ]; then\n\
-    echo "Model indirilemedi! Uygulama çalışamayacak."\n\
-    exit 1\n\
+echo "Çalışma dizini: $(pwd)"\n\
+\n\
+# Model dosyasını indir\n\
+if [ ! -f ${MODEL_PATH} ]; then\n\
+    echo "Model indiriliyor..."\n\
+    wget -q -O ${MODEL_PATH} https://github.com/atagl/solar-model/raw/main/2712.pt\n\
+    \n\
+    # Model dosyasının indirilip indirilmediğini kontrol et\n\
+    if [ -f ${MODEL_PATH} ]; then\n\
+        echo "Model başarıyla indirildi: $(ls -la ${MODEL_PATH})"\n\
+        \n\
+        # Model dosyasının içeriğini kontrol et\n\
+        echo "Model dosyası kontrol ediliyor..."\n\
+        file_type=$(file ${MODEL_PATH})\n\
+        echo "Model dosya tipi: $file_type"\n\
+        \n\
+        # İlk birkaç byte kontrol et (binary mi text mi)\n\
+        head -c 20 ${MODEL_PATH} | hexdump -C\n\
+    else\n\
+        echo "HATA: Model indirme başarısız oldu"\n\
+        exit 1\n\
+    fi\n\
+else\n\
+    echo "Model zaten mevcut: $(ls -la ${MODEL_PATH})"\n\
 fi\n\
 \n\
-echo "Model dosyası yüklendi: $MODEL_PATH"\n\
-echo "RunPod servisi başlatılıyor..."\n\
-exec python3 -u handler.py\n\
+# Uygulamayı başlat\n\
+echo "RunPod API başlatılıyor..."\n\
+python3 -u handler.py\n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
-# Servisi başlat
+# Uygulamayı başlat
 CMD ["/app/start.sh"] 
