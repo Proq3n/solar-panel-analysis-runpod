@@ -45,11 +45,8 @@ def determine_cell_position(x, y, img_width, img_height, rows=12, cols=6):
     """
     try:
         # Sınırları kontrol et
-        if x < 0 or x > img_width or y < 0 or y > img_height:
-            print(f"⚠️ Koordinatlar sınırların dışında: x={x}, y={y}, genişlik={img_width}, yükseklik={img_height}")
-            # Sınırlar içine al
-            x = max(0, min(x, img_width))
-            y = max(0, min(y, img_height))
+        x = max(0, min(x, img_width))
+        y = max(0, min(y, img_height))
         
         # Boyutları hesapla
         cell_width = img_width / cols
@@ -66,12 +63,10 @@ def determine_cell_position(x, y, img_width, img_height, rows=12, cols=6):
         # Hücre konumunu oluştur
         cell_position = f"{col_letter}{row_number}"
         
-        print(f"Konum hesaplandı: x={x}, y={y} -> {cell_position} (genişlik={img_width}, yükseklik={img_height})")
-        
         return cell_position
         
     except Exception as e:
-        print(f"❌ Hücre konumu hesaplarken hata: {type(e).__name__}: {str(e)}")
+        print(f"Hücre konumu hesaplarken hata: {str(e)}")
         # Hata durumunda varsayılan değer
         return "X0"
 
