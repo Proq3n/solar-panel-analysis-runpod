@@ -84,6 +84,17 @@ def handler(event):
     try:
         print(f"İşlem başlatıldı. Gelen istek: {event}")
         
+        # Sistem durumunu kontrol et
+        try:
+            import psutil
+            print(f"Sistem bellek durumu: {psutil.virtual_memory()}")
+            print(f"Disk alanı: {psutil.disk_usage('/')}")
+            print(f"Mevcut çalışma dizini: {os.getcwd()}")
+            print(f"/app dizini içeriği: {os.listdir('/app/') if os.path.exists('/app/') else 'Dizin bulunamadı'}")
+            print(f"/app/models dizini içeriği: {os.listdir('/app/models/') if os.path.exists('/app/models/') else 'Dizin bulunamadı'}")
+        except Exception as e:
+            print(f"Sistem bilgisi alınırken hata: {str(e)}")
+        
         # İsteği doğrula
         input_data = event.get("input", {})
         if not input_data:
@@ -102,22 +113,78 @@ def handler(event):
         try:
             # MODEL_PATH ortam değişkenini kontrol et - bu, Dockerfile'da tanımlanmıştır
             model_path = os.environ.get("MODEL_PATH", "/app/models/model.pt")
+            print(f"Model yolu: {model_path}")
             
+            # Model dosyasını kontrol et
             if not os.path.exists(model_path):
                 error_msg = f"HATA: Model dosyası bulunamadı: {model_path}"
                 print(error_msg)
                 # Mevcut dizin içeriğini listele - debug için
                 print(f"Mevcut dizin (/app/) içeriği: {os.listdir('/app/')}")
-                print(f"Models dizini içeriği: {os.listdir('/app/models/') if os.path.exists('/app/models/') else 'Models dizini bulunamadı'}")
-                return {"error": error_msg}
+                print(f"/app/models dizini içeriği: {os.listdir('/app/models/') if os.path.exists('/app/models/') else 'Models dizini bulunamadı'}")
+                
+                # Alternatif model yolları dene
+                alt_paths = [
+                    "/app/model.pt",
+                    "./models/model.pt",
+                    "./model.pt"
+                ]
+                
+                for alt_path in alt_paths:
+                    if os.path.exists(alt_path):
+                        print(f"Alternatif model dosyası bulundu: {alt_path}")
+                        model_path = alt_path
+                        break
+                
+                if not os.path.exists(model_path):
+                    return {"error": error_msg}
+            
+            # Model dosyasının boyutu ve erişilebilirliğini kontrol et
+            try:
+                file_size = os.path.getsize(model_path)
+                print(f"Model dosyası boyutu: {file_size} bytes")
+                if file_size == 0:
+                    return {"error": f"Model dosyası boş (0 byte): {model_path}"}
+                
+                # Dosya okuma iznini kontrol et
+                with open(model_path, 'rb') as f:
+                    # İlk birkaç byte'ı oku
+                    first_bytes = f.read(10)
+                    print(f"Model dosyası okunaklı: Evet ({len(first_bytes)} byte okundu)")
+            except Exception as io_error:
+                print(f"Model dosyası IO hatası: {str(io_error)}")
+                traceback.print_exc()
+                return {"error": f"Model dosyası okuma hatası: {str(io_error)}"}
                 
             print(f"Model yükleniyor: {model_path}")
             
             # Modeli başlatırken model_path parametresini sağla
-            model = PanelDefectDetector(model_path=model_path)
-            print("Model başarıyla yüklendi")
-        except Exception as model_error:
-            error_msg = f"Model yükleme hatası: {str(model_error)}"
+            # Cuda (GPU) kullanılabilirliğini kontrol et
+            try:
+                cuda_available = torch.cuda.is_available()
+                print(f"CUDA kullanılabilir: {cuda_available}")
+                if cuda_available:
+                    try:
+                        device_count = torch.cuda.device_count()
+                        current_device = torch.cuda.current_device()
+                        device_name = torch.cuda.get_device_name(current_device)
+                        print(f"GPU Bilgisi: {device_count} adet cihaz, Aktif: {current_device}, İsim: {device_name}")
+                    except Exception as gpu_error:
+                        print(f"GPU bilgisi alınırken hata: {str(gpu_error)}")
+            except Exception as cuda_error:
+                print(f"CUDA kontrolü sırasında hata: {str(cuda_error)}")
+            
+            # Modeli yükle
+            try:
+                model = PanelDefectDetector(model_path=model_path)
+                print("Model başarıyla yüklendi")
+            except Exception as model_error:
+                print(f"Model yükleme hatası: {str(model_error)}")
+                traceback.print_exc()
+                return {"error": f"Model nesnesini oluşturma hatası: {str(model_error)}"}
+                
+        except Exception as model_setup_error:
+            error_msg = f"Model hazırlık hatası: {str(model_setup_error)}"
             print(error_msg)
             traceback.print_exc()
             return {"error": error_msg}
