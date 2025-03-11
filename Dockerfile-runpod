@@ -14,17 +14,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Python bağımlılıklarını yükle
+# Python bağımlılıklarını düzgün sıra ve sürümlerle yükle
 RUN pip install --upgrade pip && \
-    pip install runpod && \
-    pip install ultralytics==8.0.20 && \
-    pip install opencv-python-headless numpy pillow && \
-    pip install psutil
+    pip install setuptools wheel && \
+    pip install torch==2.0.0 torchvision==0.15.0 --extra-index-url https://download.pytorch.org/whl/cu117 && \
+    pip install runpod==0.13.0 && \
+    pip install numpy==1.24.3 pillow==9.5.0 && \
+    pip install opencv-python-headless==4.7.0.72 && \
+    pip install psutil==5.9.5 && \
+    pip install ultralytics==8.0.20
 
-# GPU/CUDA testi için basit script oluştur
-RUN echo 'import torch; print(f"PyTorch CUDA: {torch.cuda.is_available()}, Cihaz sayısı: {torch.cuda.device_count()}")' > /app/cuda_test.py
+# Bağımlılıkları kontrol et
+RUN python -c "import torch; import torchvision; import ultralytics; from ultralytics import YOLO; print(f'PyTorch {torch.__version__}, TorchVision {torchvision.__version__}, Ultralytics {ultralytics.__version__}')"
+
+# GPU/CUDA testi için script oluştur
+RUN echo 'import torch; print(f"PyTorch CUDA: {torch.cuda.is_available()}, Device Count: {torch.cuda.device_count()}")' > /app/cuda_test.py
 
 # Uygulama dosyalarını kopyala
 COPY handler.py model.py utils.py /app/
@@ -38,13 +45,14 @@ set -e \n\
 \n\
 # Sistem bilgilerini göster \n\
 echo "==== SİSTEM BİLGİLERİ ====" \n\
-python3 --version \n\
+python --version \n\
 pip list | grep -e torch -e numpy -e ultra -e opencv -e psutil \n\
-\n\
-# GPU testi yap \n\
-echo "==== GPU/CUDA TESTİ ====" \n\
-python3 /app/cuda_test.py \n\
+python /app/cuda_test.py \n\
 nvidia-smi || echo "nvidia-smi bulunamadı" \n\
+\n\
+# Python ortamının düzgün çalışıp çalışmadığını kontrol et \n\
+echo "Python modül testi yapılıyor..." \n\
+python -c "import torch; import ultralytics; from ultralytics import YOLO; print(f\"Kurulum başarılı: PyTorch {torch.__version__}, Ultralytics {ultralytics.__version__}\")" \n\
 \n\
 # Modeli indir \n\
 if [ ! -f ${MODEL_PATH} ]; then \n\
@@ -61,11 +69,11 @@ fi \n\
 \n\
 # Modeli test et (CUDA üzerinde) \n\
 echo "Modeli GPU üzerinde test ediyorum..." \n\
-python3 -c "import torch; torch.cuda.init(); m = torch.load(\"${MODEL_PATH}\", map_location=\"cuda\"); print(f\"Model tipi: {type(m)}, CUDA: {torch.cuda.is_available()}\");" || echo "GPU model testi başarısız!" \n\
+python -c "import torch; m = torch.load(\"${MODEL_PATH}\", map_location=\"cuda\"); print(f\"Model tipi: {type(m)}, CUDA: {torch.cuda.is_available()}\");" || echo "GPU model testi başarısız!" \n\
 \n\
 # Uygulamayı başlat \n\
 echo "RunPod API başlatılıyor (GPU modu)..." \n\
-python3 -u handler.py \n\
+exec python -u handler.py \n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
 # Başlangıç komutu 
