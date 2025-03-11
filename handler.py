@@ -98,9 +98,20 @@ def handler(event):
         if not image_url:
             return {"error": "Görüntü URL'si gerekli."}
         
-        # Modeli yükle
-        print("Model yükleniyor...")
-        model = PanelDefectDetector()
+        # Modeli yükle - Dockerfile'da tanımlanan model_path ile uyumlu olmalı
+        try:
+            print("Model yükleniyor...")
+            # Dockerfile'da tanımlanan ortam değişkeni veya varsayılan değer
+            model_path = os.environ.get("MODEL_PATH", "/app/models/model.pt")
+            print(f"Model yolu: {model_path}")
+            
+            # Modeli başlatırken model_path parametresini sağla
+            model = PanelDefectDetector(model_path=model_path)
+            print("Model başarıyla yüklendi")
+        except Exception as model_error:
+            print(f"Model yükleme hatası: {str(model_error)}")
+            traceback.print_exc()
+            return {"error": f"Model yükleme hatası: {str(model_error)}"}
         
         # Görüntüyü indir
         print(f"Görüntü indiriliyor: {image_url}")
