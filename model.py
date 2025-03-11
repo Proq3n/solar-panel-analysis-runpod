@@ -5,6 +5,9 @@ import cv2
 from PIL import Image
 import traceback
 import sys
+# YOLO desteği
+import ultralytics
+from ultralytics import YOLO
 
 class PanelDefectDetector:
     """Solar panel hata tespit modeli"""
@@ -32,8 +35,18 @@ class PanelDefectDetector:
         print(f"Model dosyası boyutu: {file_size:.2f} MB")
         
         try:
-            # Modeli yükle
-            print(f"Model yükleniyor: {model_path}")
+            # Önce YOLO ile yüklemeyi dene
+            print(f"YOLO model yüklemesi deneniyor: {model_path}")
+            try:
+                # Ultralytics YOLO modeli olarak yüklemeyi dene
+                self.model = YOLO(model_path)
+                print("✓ Model YOLO olarak yüklendi")
+                return
+            except Exception as e:
+                print(f"YOLO yükleme hatası: {str(e)}")
+                print("PyTorch modeli olarak yükleme deneniyor...")
+            
+            # PyTorch modelini yükle
             model_data = torch.load(model_path, map_location=self.device)
             
             # Model veri yapısını kontrol et
