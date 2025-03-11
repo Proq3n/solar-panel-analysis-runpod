@@ -6,8 +6,13 @@ from PIL import Image
 import traceback
 import sys
 # YOLO desteği
-import ultralytics
-from ultralytics import YOLO
+try:
+    import ultralytics
+    from ultralytics import YOLO
+    ULTRALYTICS_AVAILABLE = True
+except ImportError:
+    print("⚠️ Ultralytics modülü bulunamadı, YOLO desteği olmayacak")
+    ULTRALYTICS_AVAILABLE = False
 
 class PanelDefectDetector:
     """Solar panel hata tespit modeli"""
@@ -19,11 +24,9 @@ class PanelDefectDetector:
         Args:
             model_path: Model dosya yolu
         """
-        # RunPod'da her zaman GPU kullanmaya zorla
-        os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # İlk GPU'yu kullan
-        
-        # Cihaz seçimi - RunPod'da GPU'ya zorla
-        self.device = torch.device('cuda')  # RunPod ortamında her zaman CUDA kullan
+        # GPU Kullanımını ayarla
+        self.use_cuda = torch.cuda.is_available()
+        self.device = torch.device('cuda' if self.use_cuda else 'cpu')
         print(f"PyTorch cihazı: {self.device}")
         
         # Ortam bilgilerini yazdır
@@ -37,28 +40,35 @@ class PanelDefectDetector:
         file_size = os.path.getsize(model_path) / (1024 * 1024)  # MB
         print(f"Model dosyası boyutu: {file_size:.2f} MB")
         
+        self.model_loaded = False
+        self.model_path = model_path
+        
+        # Model yükleme dene
+        self._load_model()
+        
+        # Hata sınıfları
+        self.class_names = ['hasarli-hucre', 'mikrocatlak', 'sicak-nokta']
+    
+    def _load_model(self):
+        """Model yükleme işlemi"""
         try:
-            # Önce YOLO ile yüklemeyi dene - GPU'da çalıştır
-            print(f"YOLO model yüklemesi deneniyor (GPU): {model_path}")
-            try:
-                # Ultralytics YOLO modeli olarak yüklemeyi dene
-                self.model = YOLO(model_path)
-                # GPU'ya taşı
-                self.model.to('cuda')
-                print("✓ Model YOLO olarak CUDA üzerinde yüklendi")
-                # İşlem modunu ve ayarları yapılandır
-                self.model.conf = 0.25  # Confidence threshold
-                self.model.iou = 0.45   # NMS IOU threshold
-                return
-            except Exception as e:
-                print(f"YOLO yükleme hatası: {str(e)}")
-                print("PyTorch modeli olarak yükleme deneniyor...")
+            # YOLO desteği varsa önce onu dene
+            if ULTRALYTICS_AVAILABLE:
+                try:
+                    print("YOLO modeli yükleniyor...")
+                    self.model = YOLO(self.model_path)
+                    self.model_type = "yolo"
+                    self.model_loaded = True
+                    print("✓ YOLO model başarıyla yüklendi")
+                    return
+                except Exception as e:
+                    print(f"YOLO model yükleme hatası: {e}")
             
-            # PyTorch modelini yükle
-            print(f"PyTorch model yükleniyor (GPU): {model_path}")
-            model_data = torch.load(model_path, map_location=self.device)
+            # PyTorch modelini standart şekilde yükle
+            print("PyTorch modeli yükleniyor...")
+            model_data = torch.load(self.model_path, map_location=self.device)
             
-            # Model veri yapısını kontrol et
+            # Model formatını kontrol et
             if isinstance(model_data, dict) and 'model' in model_data:
                 self.model = model_data['model']
                 print("Model 'model' anahtarından yüklendi")
@@ -69,26 +79,24 @@ class PanelDefectDetector:
                 print(f"Bilinmeyen model formatı: {type(model_data)}")
                 self.model = model_data  # Doğrudan kullan
             
-            # Cihaza taşı - GPU
+            # Cihaza taşı
             self.model = self.model.to(self.device)
-            print(f"Model GPU'ya taşındı: {self.device}")
             
-            # Değerlendirme moduna al
+            # Değerlendirme modu
             self.model.eval()
             
-            # PyTorch CUDA optimizasyonları
-            torch.backends.cudnn.benchmark = True  # Sabit boyutlu görüntüler için hızlandırma
-            torch.backends.cudnn.deterministic = False  # Daha fazla hız
+            # Gradyanları devre dışı bırak
+            for param in self.model.parameters():
+                param.requires_grad = False
             
-            print(f"Model başarıyla GPU üzerinde yüklendi: {type(self.model).__name__}")
+            self.model_type = "pytorch"
+            self.model_loaded = True
+            print(f"✓ PyTorch model başarıyla yüklendi: {type(self.model).__name__}")
             
         except Exception as e:
-            print(f"Model yükleme hatası: {type(e).__name__}: {str(e)}")
+            print(f"Model yükleme hatası: {e}")
             traceback.print_exc()
             raise
-        
-        # Hata sınıfları
-        self.class_names = ['hasarli-hucre', 'mikrocatlak', 'sicak-nokta']
     
     def _print_environment(self):
         """Ortam bilgilerini yazdır"""
@@ -102,16 +110,12 @@ class PanelDefectDetector:
             print(f"CUDA versiyonu: {torch.version.cuda}")
             try:
                 print(f"CUDA cihazı: {torch.cuda.get_device_name(0)}")
-                print(f"CUDA belleği: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-                print(f"Rezerve edilen CUDA belleği: {torch.cuda.memory_reserved(0) / 1e9:.2f} GB")
-                print(f"Kullanılan CUDA belleği: {torch.cuda.memory_allocated(0) / 1e9:.2f} GB")
             except:
                 print("CUDA cihaz bilgileri alınamadı")
-        
-        print(f"Çalışma dizini: {os.getcwd()}")
         print(f"Numpy: {np.__version__}")
         print(f"OpenCV: {cv2.__version__}")
-        print(f"Ultralytics: {ultralytics.__version__}")
+        if ULTRALYTICS_AVAILABLE:
+            print(f"Ultralytics: {ultralytics.__version__}")
         print("=" * 50)
     
     def preprocess_image(self, image):
@@ -144,7 +148,7 @@ class PanelDefectDetector:
         # NumPy -> Tensor ve batch boyutu ekle: [C, H, W] -> [1, C, H, W]
         image = torch.from_numpy(image).float().unsqueeze(0)
         
-        # Cihaza taşı - GPU
+        # Cihaza taşı
         image = image.to(self.device)
         
         return image
@@ -159,6 +163,11 @@ class PanelDefectDetector:
         Returns:
             list: Tespit edilen hatalar listesi 
         """
+        # Model yüklü değilse boş liste döndür
+        if not self.model_loaded:
+            print("Model yüklü değil, sonuç döndürülemiyor")
+            return []
+            
         try:
             # Görüntü boyutlarını al
             if isinstance(image, Image.Image):
@@ -169,109 +178,111 @@ class PanelDefectDetector:
             # Tespit sonuçları için liste
             detections = []
             
-            # YOLO modeli mi kontrolü yap
-            if isinstance(self.model, YOLO):
-                # Doğrudan YOLO ile tespit
+            # YOLO modeli kontrolü
+            if self.model_type == "yolo" and ULTRALYTICS_AVAILABLE:
                 try:
-                    # YOLO predict metodunu çağır - GPU üzerinde
-                    results = self.model.predict(image, device='cuda', verbose=False)
+                    # YOLO ile tespit yap
+                    results = self.model.predict(
+                        source=image, 
+                        verbose=False,
+                        device=0 if self.use_cuda else 'cpu'
+                    )
                     
-                    if not results or len(results) == 0:
-                        print("YOLO modeli hiç tespit sonucu döndürmedi")
+                    if len(results) == 0:
+                        print("YOLO modeli hiç tespit yapmadı.")
                         return []
                     
-                    # İlk sonucu al (batch içindeki)
+                    # İlk sonuç setini kullan
                     result = results[0]
                     
-                    # Tespit kutularını işle
+                    # Sonuçları işle
                     if hasattr(result, 'boxes') and len(result.boxes) > 0:
-                        for i, box in enumerate(result.boxes):
+                        boxes = result.boxes
+                        
+                        for i, box in enumerate(boxes):
                             try:
-                                # Kutu koordinatları xyxy formatında (x1, y1, x2, y2)
-                                bbox = box.xyxy[0].cpu().numpy()
-                                x1, y1, x2, y2 = bbox
+                                # Kutu koordinatları
+                                coords = box.xyxy[0].cpu().numpy()
+                                x1, y1, x2, y2 = coords
                                 
-                                # Güven skorunu al
+                                # Güven skoru
                                 confidence = float(box.conf[0].cpu().numpy())
                                 
-                                # Sınıf ID'sini al
+                                # Sınıf ID
                                 class_id = int(box.cls[0].cpu().numpy())
                                 
-                                # Sınıf adını belirle
+                                # Sınıf adı
                                 class_name = self.class_names[class_id] if class_id < len(self.class_names) else f"class_{class_id}"
                                 
-                                # Sonuç sözlüğü oluştur
-                                detection = {
+                                # Algılama ekle
+                                detections.append({
                                     "bbox": [float(x1), float(y1), float(x2), float(y2)],
                                     "confidence": confidence,
                                     "class_id": class_id,
                                     "class": class_name
-                                }
-                                
-                                detections.append(detection)
+                                })
                             except Exception as e:
-                                print(f"Tek kutu işleme hatası: {str(e)}")
+                                print(f"YOLO tespit ayrıştırma hatası: {e}")
                                 continue
-                    
-                    return detections
-                    
                 except Exception as e:
-                    print(f"YOLO tespit hatası: {str(e)}")
+                    print(f"YOLO tespit işlemi hatası: {e}")
                     traceback.print_exc()
             
-            # Klasik PyTorch model tespit süreci - Yolo olmayan model için
-            try:
-                # Görüntüyü ön işle
-                input_tensor = self.preprocess_image(image)
-                
-                # Model çıkarımını yap
-                with torch.no_grad():
-                    predictions = self.model(input_tensor)
-                
-                # Çıktı tipini kontrol et
-                if isinstance(predictions, tuple):
-                    predictions = predictions[0]  # İlk çıktıyı al
-                
-                # Tensor -> NumPy
-                boxes = predictions.cpu().numpy()
-                
-                # Kutuları işle
-                for box in boxes:
-                    # Box formatı: [x1, y1, x2, y2, confidence, class_id]
-                    if len(box) < 6:  # Yeterli bilgi yoksa atla
-                        continue
+            # PyTorch modeli için tespit
+            else:
+                try:
+                    # Görüntüyü ön işle
+                    input_tensor = self.preprocess_image(image)
                     
-                    # Verileri çıkar
-                    x1, y1, x2, y2 = box[0:4]
-                    confidence = float(box[4])
-                    class_id = int(box[5])
+                    # Çıkarım yap
+                    with torch.no_grad():
+                        predictions = self.model(input_tensor)
                     
-                    # Koordinatları orijinal görüntü boyutlarına ölçekle
-                    x1_orig = float(x1) * original_width / 640
-                    y1_orig = float(y1) * original_height / 640
-                    x2_orig = float(x2) * original_width / 640
-                    y2_orig = float(y2) * original_height / 640
+                    # Çıktıyı işle
+                    if isinstance(predictions, tuple):
+                        predictions = predictions[0]
                     
-                    # Sınıf adını al
-                    class_name = self.class_names[class_id] if class_id < len(self.class_names) else f"class_{class_id}"
+                    # Tensor -> NumPy
+                    boxes = predictions.cpu().numpy()
                     
-                    # Tespiti ekle
-                    detections.append({
-                        "bbox": [x1_orig, y1_orig, x2_orig, y2_orig],
-                        "confidence": confidence,
-                        "class_id": class_id,
-                        "class": class_name
-                    })
-                    
-            except Exception as e:
-                print(f"Tespit sırasında hata: {e}")
-                traceback.print_exc()
-                # Hata durumunda boş liste döndür
-                return []
+                    # Sonuçları işle
+                    for box in boxes:
+                        # Box formatı: [x1, y1, x2, y2, confidence, class_id]
+                        if len(box) < 6:
+                            continue
+                        
+                        # Veriyi çıkar
+                        x1, y1, x2, y2 = box[0:4]
+                        confidence = float(box[4])
+                        class_id = int(box[5])
+                        
+                        # Düşük güven skorlarını filtrele
+                        if confidence < 0.25:
+                            continue
+                        
+                        # Koordinatları orijinal görüntü boyutlarına ölçekle
+                        x1_orig = float(x1) * original_width / 640
+                        y1_orig = float(y1) * original_height / 640
+                        x2_orig = float(x2) * original_width / 640
+                        y2_orig = float(y2) * original_height / 640
+                        
+                        # Sınıf adını al
+                        class_name = self.class_names[class_id] if class_id < len(self.class_names) else f"class_{class_id}"
+                        
+                        # Tespit ekle
+                        detections.append({
+                            "bbox": [x1_orig, y1_orig, x2_orig, y2_orig],
+                            "confidence": confidence,
+                            "class_id": class_id,
+                            "class": class_name
+                        })
+                except Exception as e:
+                    print(f"PyTorch tespit hatası: {e}")
+                    traceback.print_exc()
             
             return detections
             
         except Exception as e:
-            print(f"Tespit sırasında hata: {type(e).__name__}: {str(e)}")
+            print(f"Tespit fonksiyonu hatası: {e}")
             traceback.print_exc()
             return [] 
