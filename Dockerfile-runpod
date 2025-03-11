@@ -15,11 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Python bağımlılıklarını en basit şekilde yükle
+# Python bağımlılıklarını en basit şekilde yükle - PyTorch zaten var
 RUN pip install --upgrade pip && \
     pip install runpod && \
-    pip install ultralytics && \
-    pip install opencv-python-headless numpy pillow
+    pip install ultralytics==8.0.20 && \
+    pip install opencv-python-headless numpy pillow && \
+    pip install psutil
 
 # Uygulama dosyalarını kopyala
 COPY handler.py model.py utils.py /app/
@@ -34,7 +35,7 @@ set -e \n\
 # Sistem bilgilerini göster \n\
 echo "==== SİSTEM BİLGİLERİ ====" \n\
 python3 --version \n\
-pip list | grep -e torch -e numpy -e ultra -e opencv \n\
+pip list | grep -e torch -e numpy -e ultra -e opencv -e psutil \n\
 \n\
 # Modeli indir \n\
 if [ ! -f ${MODEL_PATH} ]; then \n\
@@ -48,6 +49,10 @@ if [ ! -f ${MODEL_PATH} ]; then \n\
     \n\
     echo "Model başarıyla indirildi: $(du -h ${MODEL_PATH})" \n\
 fi \n\
+\n\
+# Modeli test et \n\
+echo "Modeli test ediyorum..." \n\
+python3 -c "import torch; m = torch.load(\"${MODEL_PATH}\", map_location=\"cpu\"); print(f\"Model tipi: {type(m)}\")" || echo "Model testi başarısız!" \n\
 \n\
 # Uygulamayı başlat \n\
 echo "RunPod API başlatılıyor..." \n\
