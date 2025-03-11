@@ -90,6 +90,36 @@ def handler(event):
         detections = model.detect_defects(image)
         print(f"Tespit edilen hata sayısı: {len(detections)}")
         
+        # Tespitleri kontrol et ve doğru sınıf adlarını kullan
+        class_names = [
+            'Soldering Error', 
+            'Ribbon Offset', 
+            'Crack', 
+            'Broken Cell', 
+            'Broken Finger', 
+            'SEoR', 
+            'Stain', 
+            'Microcrack', 
+            'Scratch'
+        ]
+        print("Tespit edilen hatalar:")
+        for i, defect in enumerate(detections):
+            # Orijinal sınıf ID'sini ve adını al
+            class_id = defect.get("class_id", 0)
+            current_class = defect.get("class", "unknown")
+            
+            # Sınıf ID'si varsa ve geçerliyse, doğru ismi kullan
+            if class_id is not None and 0 <= class_id < len(class_names):
+                # Sınıf adını güncelle
+                proper_class = class_names[class_id]
+                if current_class != proper_class:
+                    print(f"  {i+1}. tespit: Sınıf düzeltiliyor: '{current_class}' -> '{proper_class}'")
+                    defect["class"] = proper_class
+                else:
+                    print(f"  {i+1}. tespit: Sınıf '{current_class}' (doğru)")
+            else:
+                print(f"  {i+1}. tespit: Geçersiz sınıf ID ({class_id}), sınıf '{current_class}' olarak kalıyor")
+                
         # Görüntü boyutları (hücre konumu hesaplama için)
         img_width, img_height = image.size
         
