@@ -30,7 +30,7 @@ COPY handler.py model.py utils.py /app/
 # Model dizinini oluştur
 RUN mkdir -p /app/models
 
-# Başlangıç scripti oluştur (tek satır olarak daha okunabilir)
+# Başlangıç scripti oluştur - sadece 2712.pt indirme stratejisi ile
 RUN echo '#!/bin/bash\n\
 set -e\n\
 \n\
@@ -40,15 +40,26 @@ pip list | grep -e torch -e numpy -e ultra -e opencv -e psutil\n\
 nvidia-smi || echo "nvidia-smi bulunamadı"\n\
 \n\
 if [ ! -f ${MODEL_PATH} ]; then\n\
-    echo "Model indiriliyor..."\n\
-    wget -O ${MODEL_PATH} https://raw.githubusercontent.com/Proq3n/solar-panel-analysis-runpod/305d4577bd68da5255bd703238cb5fd9b84b46ae/2712.pt\n\
+    echo "Model yok, GitHub\'dan 2712.pt indiriliyor: ${MODEL_PATH}"\n\
+    mkdir -p /app/models\n\
     \n\
-    if [ ! -f ${MODEL_PATH} ]; then\n\
-        echo "Model indirilemedi!"\n\
+    # Sadece GitHub kaynağından 2712.pt indir\n\
+    if wget -q -O ${MODEL_PATH} https://github.com/Proq3n/solar-panel-analysis-runpod/raw/master/2712.pt; then\n\
+        echo "Model başarıyla indirildi (GitHub 2712.pt): $(du -h ${MODEL_PATH})"\n\
+    else\n\
+        echo "GitHub\'dan 2712.pt indirme başarısız."\n\
+        echo "Model indirilemedi veya dosya boş."\n\
         exit 1\n\
     fi\n\
-    \n\
-    echo "Model başarıyla indirildi: $(du -h ${MODEL_PATH})"\n\
+else\n\
+    echo "Model zaten mevcut: ${MODEL_PATH}"\n\
+    ls -la ${MODEL_PATH}\n\
+fi\n\
+\n\
+# Model erişim iznini kontrol et\n\
+if [ -f ${MODEL_PATH} ]; then\n\
+    chmod 644 ${MODEL_PATH}\n\
+    echo "Model dosyası izinleri güncellendi: $(ls -la ${MODEL_PATH})"\n\
 fi\n\
 \n\
 echo "RunPod API başlatılıyor (GPU modu)..."\n\
