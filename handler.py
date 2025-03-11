@@ -121,15 +121,24 @@ def handler(event):
                 ]
             else:
                 print(f"Gönderilen slice koordinatları kullanılıyor: {len(slice_coords)} dilim")
+            
+            # Koordinatları düzgün formata dönüştür (JSON'dan liste olarak gelebilir)
+            normalized_slice_coords = []
+            for coords in slice_coords:
+                if isinstance(coords, list) and len(coords) == 4:
+                    # JSON'dan gelen koordinatlar float olabilir, int'e çevir
+                    x1, y1, x2, y2 = map(int, coords)
+                    normalized_slice_coords.append((x1, y1, x2, y2))
+                else:
+                    print(f"Geçersiz koordinat formatı: {coords}, atlanıyor")
                 
             # Tüm tespitleri toplamak için liste
             all_detections = []
             
             # Her dilimi ayrı ayrı işle
-            for i, coords in enumerate(slice_coords):
+            for i, coords in enumerate(normalized_slice_coords):
                 try:
-                    # JSON'dan gelen koordinatlar float olabilir, int'e çevir
-                    x1, y1, x2, y2 = map(int, coords)
+                    x1, y1, x2, y2 = coords
                     print(f"Dilim #{i+1} işleniyor: ({x1}, {y1}, {x2}, {y2})")
                     
                     # Dilimi kes
@@ -154,7 +163,7 @@ def handler(event):
                             # Düzeltilmiş koordinatları güncelle
                             detection["bbox"] = absolute_bbox
                             detection["slice_index"] = i  # Dilim indeksi
-                            detection["slice_coords"] = coords  # Dilim koordinatları
+                            detection["slice_coords"] = [x1, y1, x2, y2]  # Dilim koordinatları
                     
                     # Bu dilimdeki tespitleri ana listeye ekle
                     all_detections.extend(slice_detections)
