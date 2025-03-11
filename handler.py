@@ -7,6 +7,8 @@ from io import BytesIO
 import json
 import traceback
 import sys
+# YOLO desteği için ultralytics modülünü içe aktar
+import ultralytics
 
 # Model sınıfını ve yardımcı fonksiyonları içe aktar
 from model import PanelDefectDetector
