@@ -7,9 +7,12 @@ from io import BytesIO
 import json
 import traceback
 import sys
-# YOLO desteği
-import ultralytics
-from ultralytics import YOLO
+# YOLO desteği - basit import
+try:
+    import ultralytics
+    from ultralytics import YOLO
+except ImportError:
+    print("⚠️ Ultralytics modülü yüklenemedi!")
 
 # Model sınıfını ve yardımcı fonksiyonları içe aktar
 from model import PanelDefectDetector
@@ -18,51 +21,10 @@ from utils import determine_cell_position
 # Global model değişkeni (yeniden yüklemeyi önlemek için)
 MODEL = None
 
-def check_environment():
-    """Çalışma ortamını kontrol eder ve eksik modülleri yükler"""
-    print("=" * 50)
-    print("ORTAM KONTROLÜ BAŞLADI")
-    print("=" * 50)
-    print(f"Python: {sys.version}")
-    print(f"PyTorch: {torch.__version__}")
-    print(f"CUDA Durumu: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"CUDA Cihazı: {torch.cuda.get_device_name(0)}")
-        print(f"CUDA Versiyonu: {torch.version.cuda}")
-    print(f"Ultralytics: {ultralytics.__version__}")
-    
-    # Paketleri kontrol et ve gerekirse yükleme yap
-    try:
-        import pkg_resources
-        installed_packages = {pkg.key: pkg.version for pkg in pkg_resources.working_set}
-        required_packages = {
-            'torch': '2.0.0', 
-            'torchvision': '0.15.0',
-            'ultralytics': '8.0.20',
-            'numpy': '1.24.3',
-            'opencv-python-headless': '4.7.0.72',
-            'pillow': '9.5.0'
-        }
-        
-        for package, version in required_packages.items():
-            if package not in installed_packages:
-                print(f"⚠️ Eksik paket: {package}, yükleniyor...")
-                os.system(f"pip install {package}=={version}")
-            elif installed_packages[package] != version:
-                print(f"⚠️ Sürüm uyumsuzluğu: {package} {installed_packages[package]} -> {version}, güncelleniyor...")
-                os.system(f"pip install {package}=={version} --force-reinstall")
-            else:
-                print(f"✓ {package}=={version} kurulu")
-    
-    except Exception as e:
-        print(f"Paket kontrolü sırasında hata: {str(e)}")
-    
-    print("=" * 50)
-
 def download_image(url):
     """URL'den görüntü indirir"""
     try:
-        response = requests.get(url, timeout=15)
+        response = requests.get(url, timeout=30)
         response.raise_for_status()
         
         image = Image.open(BytesIO(response.content))
@@ -83,8 +45,10 @@ def load_model():
         return MODEL
     
     try:
-        # Çalışma ortamını kontrol et
-        check_environment()
+        # Ortam bilgilerini göster
+        print(f"Python: {sys.version}")
+        print(f"PyTorch: {torch.__version__}")
+        print(f"CUDA mevcut: {torch.cuda.is_available()}")
         
         # Model dosyasını kontrol et
         model_path = os.environ.get("MODEL_PATH", "/app/models/model.pt")
@@ -92,7 +56,6 @@ def load_model():
             raise FileNotFoundError(f"Model dosyası bulunamadı: {model_path}")
         
         # Model nesnesini oluştur
-        print(f"Model yükleniyor: {model_path}")
         MODEL = PanelDefectDetector(model_path)
         print(f"Model başarıyla yüklendi!")
         
@@ -170,9 +133,8 @@ def handler(event):
         traceback.print_exc()
         return {"status_code": 500, "error": str(e)}
 
-# RunPod API'yi başlat - önce ortam kontrolü yap
+# RunPod API'yi başlat
 print("=" * 70)
 print("RunPod API başlatılıyor...")
 print("=" * 70)
-check_environment()
 runpod.serverless.start({"handler": handler}) 
