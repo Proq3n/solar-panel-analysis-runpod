@@ -95,6 +95,7 @@ def handler(event):
             image_url = input_data.get("image_url")
             project_id = input_data.get("project_id", "unknown")
             image_id = input_data.get("image_id", "unknown")
+            slice_coords = input_data.get("slice_coords", None)  # Slice koordinatları
             
             if not image_url:
                 return {"status_code": 400, "error": "image_url gerekli"}
@@ -105,10 +106,62 @@ def handler(event):
             # Görüntüyü indir
             image = download_image(image_url)
             
-            # Görüntüyü analiz et ve hataları tespit et
-            print("Görüntü analiz ediliyor...")
-            detections = model.detect_defects(image)
-            print(f"Tespit edilen hata sayısı: {len(detections)}")
+            # Görüntü boyutları (hücre konumu hesaplama için)
+            img_width, img_height = image.size
+            
+            # Eğer slice koordinatları gönderilmişse kullan, yoksa varsayılan 2x2 grid oluştur
+            if not slice_coords:
+                print("Slice koordinatları bulunamadı, varsayılan grid oluşturuluyor (2x2)")
+                # Görüntüyü 4 bölgeye ayır (2x2 grid)
+                slice_coords = [
+                    [0, 0, img_width//2, img_height//2],             # Sol üst
+                    [img_width//2, 0, img_width, img_height//2],     # Sağ üst
+                    [0, img_height//2, img_width//2, img_height],    # Sol alt
+                    [img_width//2, img_height//2, img_width, img_height]  # Sağ alt
+                ]
+            else:
+                print(f"Gönderilen slice koordinatları kullanılıyor: {len(slice_coords)} dilim")
+                
+            # Tüm tespitleri toplamak için liste
+            all_detections = []
+            
+            # Her dilimi ayrı ayrı işle
+            for i, coords in enumerate(slice_coords):
+                try:
+                    # JSON'dan gelen koordinatlar float olabilir, int'e çevir
+                    x1, y1, x2, y2 = map(int, coords)
+                    print(f"Dilim #{i+1} işleniyor: ({x1}, {y1}, {x2}, {y2})")
+                    
+                    # Dilimi kes
+                    image_slice = image.crop((x1, y1, x2, y2))
+                    
+                    # Dilimi analiz et
+                    slice_detections = model.detect_defects(image_slice)
+                    print(f"Dilim #{i+1}'de tespit edilen hata sayısı: {len(slice_detections)}")
+                    
+                    # Tespitleri ana görüntüye göre koordinat dönüşümü yap
+                    for detection in slice_detections:
+                        if "bbox" in detection:
+                            # Bounding box koordinatlarını al
+                            bbox = detection["bbox"]
+                            # Dilim koordinatlarına göre düzelt
+                            absolute_bbox = [
+                                bbox[0] + x1,  # x1
+                                bbox[1] + y1,  # y1
+                                bbox[2] + x1,  # x2
+                                bbox[3] + y1   # y2
+                            ]
+                            # Düzeltilmiş koordinatları güncelle
+                            detection["bbox"] = absolute_bbox
+                            detection["slice_index"] = i  # Dilim indeksi
+                            detection["slice_coords"] = coords  # Dilim koordinatları
+                    
+                    # Bu dilimdeki tespitleri ana listeye ekle
+                    all_detections.extend(slice_detections)
+                    
+                except Exception as slice_error:
+                    print(f"❌ Dilim #{i+1} işlenirken hata: {str(slice_error)}")
+                    traceback.print_exc()
             
             # Tespitleri kontrol et ve doğru sınıf adlarını kullan
             class_names = [
@@ -122,8 +175,8 @@ def handler(event):
                 'Microcrack', 
                 'Scratch'
             ]
-            print("Tespit edilen hatalar:")
-            for i, defect in enumerate(detections):
+            print(f"Toplam tespit edilen hata sayısı: {len(all_detections)}")
+            for i, defect in enumerate(all_detections):
                 # Orijinal sınıf ID'sini ve adını al
                 class_id = defect.get("class_id", 0)
                 current_class = defect.get("class", "unknown")
@@ -145,7 +198,7 @@ def handler(event):
             
             # Hata konumlarını hesapla
             defects_with_positions = []
-            for defect in detections:
+            for defect in all_detections:
                 try:
                     bbox = defect["bbox"]
                     
