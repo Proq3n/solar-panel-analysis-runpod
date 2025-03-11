@@ -46,8 +46,34 @@ class PanelDefectDetector:
         # Model yükleme dene
         self._load_model()
         
-        # Hata sınıfları
-        self.class_names = ['hasarli-hucre', 'mikrocatlak', 'sicak-nokta']
+        # Hata sınıfları - bu sınıf adları, modelimizin beklediği sınıf adlarıdır
+        self.class_names = [
+            'Soldering Error', 
+            'Ribbon Offset', 
+            'Crack', 
+            'Broken Cell', 
+            'Broken Finger', 
+            'SEoR', 
+            'Stain', 
+            'Microcrack', 
+            'Scratch'
+        ]
+        
+        # YOLO'nun varsayılan sınıf ID'leri yerine kendi sınıf adlarımızı kullanmak için sınıf ID'lerini eşleştirme
+        # Anahtar: YOLO sınıf ID'si, Değer: Bizim class_names listemizde hangi indekse karşılık geldiği
+        self.class_id_mapping = {
+            0: 0,  # YOLO sınıf 0 -> 'Soldering Error'
+            1: 1,  # YOLO sınıf 1 -> 'Ribbon Offset'
+            2: 2,  # YOLO sınıf 2 -> 'Crack'
+            3: 3,  # YOLO sınıf 3 -> 'Broken Cell'
+            4: 4,  # YOLO sınıf 4 -> 'Broken Finger'
+            5: 5,  # YOLO sınıf 5 -> 'SEoR'
+            6: 6,  # YOLO sınıf 6 -> 'Stain'
+            7: 7,  # YOLO sınıf 7 -> 'Microcrack'
+            8: 8,  # YOLO sınıf 8 -> 'Scratch'
+        }
+        
+        print(f"Model sınıf adları: {self.class_names}")
     
     def _load_model(self):
         """Model yükleme işlemi"""
@@ -211,14 +237,18 @@ class PanelDefectDetector:
                                 # Sınıf ID
                                 class_id = int(box.cls[0].cpu().numpy())
                                 
-                                # Sınıf adı
-                                class_name = self.class_names[class_id] if class_id < len(self.class_names) else f"class_{class_id}"
+                                # Sınıf adı - eşleştirme kullan
+                                # Önce class_id'yi kendi sınıf indeksimize eşleştir
+                                mapped_id = self.class_id_mapping.get(class_id, 0)  # Bilinmeyen ID'ler için varsayılan 0
+                                class_name = self.class_names[mapped_id]
+                                
+                                print(f"YOLO tespiti - Orijinal ID: {class_id}, Eşleşen ID: {mapped_id}, Sınıf adı: {class_name}")
                                 
                                 # Algılama ekle
                                 detections.append({
                                     "bbox": [float(x1), float(y1), float(x2), float(y2)],
                                     "confidence": confidence,
-                                    "class_id": class_id,
+                                    "class_id": mapped_id,  # Eşlenmiş ID'yi kullan
                                     "class": class_name
                                 })
                             except Exception as e:
@@ -266,14 +296,17 @@ class PanelDefectDetector:
                         x2_orig = float(x2) * original_width / 640
                         y2_orig = float(y2) * original_height / 640
                         
-                        # Sınıf adını al
-                        class_name = self.class_names[class_id] if class_id < len(self.class_names) else f"class_{class_id}"
+                        # Sınıf adını al - Önce ID'yi eşleştir
+                        mapped_id = self.class_id_mapping.get(class_id, 0)  # Bilinmeyen ID'ler için varsayılan 0
+                        class_name = self.class_names[mapped_id]
+                        
+                        print(f"PyTorch tespiti - Orijinal ID: {class_id}, Eşleşen ID: {mapped_id}, Sınıf adı: {class_name}")
                         
                         # Tespit ekle
                         detections.append({
                             "bbox": [x1_orig, y1_orig, x2_orig, y2_orig],
                             "confidence": confidence,
-                            "class_id": class_id,
+                            "class_id": mapped_id,  # Eşlenmiş ID'yi kullan
                             "class": class_name
                         })
                 except Exception as e:
