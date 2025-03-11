@@ -6,6 +6,7 @@ WORKDIR /app
 # Ortam değişkenlerini ayarla
 ENV MODEL_PATH=/app/models/model.pt
 ENV PYTHONUNBUFFERED=1
+ENV CUDA_VISIBLE_DEVICES=0
 
 # Gerekli sistem paketlerini yükle
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -15,12 +16,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Python bağımlılıklarını en basit şekilde yükle - PyTorch zaten var
+# Python bağımlılıklarını yükle
 RUN pip install --upgrade pip && \
     pip install runpod && \
     pip install ultralytics==8.0.20 && \
     pip install opencv-python-headless numpy pillow && \
     pip install psutil
+
+# GPU/CUDA testi için basit script oluştur
+RUN echo 'import torch; print(f"PyTorch CUDA: {torch.cuda.is_available()}, Cihaz sayısı: {torch.cuda.device_count()}")' > /app/cuda_test.py
 
 # Uygulama dosyalarını kopyala
 COPY handler.py model.py utils.py /app/
@@ -37,6 +41,11 @@ echo "==== SİSTEM BİLGİLERİ ====" \n\
 python3 --version \n\
 pip list | grep -e torch -e numpy -e ultra -e opencv -e psutil \n\
 \n\
+# GPU testi yap \n\
+echo "==== GPU/CUDA TESTİ ====" \n\
+python3 /app/cuda_test.py \n\
+nvidia-smi || echo "nvidia-smi bulunamadı" \n\
+\n\
 # Modeli indir \n\
 if [ ! -f ${MODEL_PATH} ]; then \n\
     echo "Model indiriliyor..." \n\
@@ -50,12 +59,12 @@ if [ ! -f ${MODEL_PATH} ]; then \n\
     echo "Model başarıyla indirildi: $(du -h ${MODEL_PATH})" \n\
 fi \n\
 \n\
-# Modeli test et \n\
-echo "Modeli test ediyorum..." \n\
-python3 -c "import torch; m = torch.load(\"${MODEL_PATH}\", map_location=\"cpu\"); print(f\"Model tipi: {type(m)}\")" || echo "Model testi başarısız!" \n\
+# Modeli test et (CUDA üzerinde) \n\
+echo "Modeli GPU üzerinde test ediyorum..." \n\
+python3 -c "import torch; torch.cuda.init(); m = torch.load(\"${MODEL_PATH}\", map_location=\"cuda\"); print(f\"Model tipi: {type(m)}, CUDA: {torch.cuda.is_available()}\");" || echo "GPU model testi başarısız!" \n\
 \n\
 # Uygulamayı başlat \n\
-echo "RunPod API başlatılıyor..." \n\
+echo "RunPod API başlatılıyor (GPU modu)..." \n\
 python3 -u handler.py \n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
