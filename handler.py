@@ -161,6 +161,7 @@ def handler(event):
                         "bbox": bbox,
                         "confidence": defect["confidence"],
                         "class": defect["class"],
+                        "class_id": defect.get("class_id", 0),  # Eğer yoksa varsayılan 0
                         "cell_position": cell_position
                     }
                     
