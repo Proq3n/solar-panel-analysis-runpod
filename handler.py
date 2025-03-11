@@ -81,232 +81,181 @@ def load_model():
         raise
 
 def handler(event):
-    try:
-        print(f"İşlem başlatıldı. Gelen istek: {event}")
-        
-        # Sistem durumunu kontrol et
+    """RunPod serveri için ana fonksiyon"""
+    max_retries = 2
+    current_try = 0
+    
+    while current_try <= max_retries:
         try:
-            import psutil
-            print(f"Sistem bellek durumu: {psutil.virtual_memory()}")
-            print(f"Disk alanı: {psutil.disk_usage('/')}")
-            print(f"Mevcut çalışma dizini: {os.getcwd()}")
-            print(f"/app dizini içeriği: {os.listdir('/app/') if os.path.exists('/app/') else 'Dizin bulunamadı'}")
-            print(f"/app/models dizini içeriği: {os.listdir('/app/models/') if os.path.exists('/app/models/') else 'Dizin bulunamadı'}")
-        except Exception as e:
-            print(f"Sistem bilgisi alınırken hata: {str(e)}")
-        
-        # İsteği doğrula
-        input_data = event.get("input", {})
-        if not input_data:
-            return {"error": "Geçersiz istek formatı. 'input' anahtarı gerekli."}
-        
-        # Modelin URL'sini, project_id ve image_id değerlerini al
-        image_url = input_data.get("image_url")
-        project_id = input_data.get("project_id", "unknown")
-        image_id = input_data.get("image_id", "unknown")
-        slice_coords = input_data.get("slice_coords", [])
-        
-        if not image_url:
-            return {"error": "Görüntü URL'si gerekli."}
-        
-        # Modeli yükle - Dockerfile'da tanımlanan model_path ile uyumlu olmalı
-        try:
-            # MODEL_PATH ortam değişkenini kontrol et - bu, Dockerfile'da tanımlanmıştır
-            model_path = os.environ.get("MODEL_PATH", "/app/models/model.pt")
-            print(f"Model yolu: {model_path}")
+            current_try += 1
+            print(f"Handler başlatıldı (Deneme {current_try}/{max_retries+1}). Event: {event}\n")
             
-            # Model dosyasını kontrol et
-            if not os.path.exists(model_path):
-                error_msg = f"HATA: Model dosyası bulunamadı: {model_path}"
-                print(error_msg)
-                # Mevcut dizin içeriğini listele - debug için
-                print(f"Mevcut dizin (/app/) içeriği: {os.listdir('/app/')}")
-                print(f"/app/models dizini içeriği: {os.listdir('/app/models/') if os.path.exists('/app/models/') else 'Models dizini bulunamadı'}")
-                
-                # Alternatif model yolları dene
-                alt_paths = [
-                    "/app/model.pt",
-                    "./models/model.pt",
-                    "./model.pt"
-                ]
-                
-                for alt_path in alt_paths:
-                    if os.path.exists(alt_path):
-                        print(f"Alternatif model dosyası bulundu: {alt_path}")
-                        model_path = alt_path
-                        break
-                
-                if not os.path.exists(model_path):
-                    return {"error": error_msg}
+            # Girdi verilerini al
+            input_data = event.get("input", {})
+            image_url = input_data.get("image_url")
+            project_id = input_data.get("project_id", "unknown")
+            image_id = input_data.get("image_id", "unknown")
+            slice_coords = input_data.get("slice_coords", None)  # Slice koordinatları
             
-            # Model dosyasının boyutu ve erişilebilirliğini kontrol et
-            try:
-                file_size = os.path.getsize(model_path)
-                print(f"Model dosyası boyutu: {file_size} bytes")
-                if file_size == 0:
-                    return {"error": f"Model dosyası boş (0 byte): {model_path}"}
-                
-                # Dosya okuma iznini kontrol et
-                with open(model_path, 'rb') as f:
-                    # İlk birkaç byte'ı oku
-                    first_bytes = f.read(10)
-                    print(f"Model dosyası okunaklı: Evet ({len(first_bytes)} byte okundu)")
-            except Exception as io_error:
-                print(f"Model dosyası IO hatası: {str(io_error)}")
-                traceback.print_exc()
-                return {"error": f"Model dosyası okuma hatası: {str(io_error)}"}
-                
-            print(f"Model yükleniyor: {model_path}")
-            
-            # Modeli başlatırken model_path parametresini sağla
-            # Cuda (GPU) kullanılabilirliğini kontrol et
-            try:
-                cuda_available = torch.cuda.is_available()
-                print(f"CUDA kullanılabilir: {cuda_available}")
-                if cuda_available:
-                    try:
-                        device_count = torch.cuda.device_count()
-                        current_device = torch.cuda.current_device()
-                        device_name = torch.cuda.get_device_name(current_device)
-                        print(f"GPU Bilgisi: {device_count} adet cihaz, Aktif: {current_device}, İsim: {device_name}")
-                    except Exception as gpu_error:
-                        print(f"GPU bilgisi alınırken hata: {str(gpu_error)}")
-            except Exception as cuda_error:
-                print(f"CUDA kontrolü sırasında hata: {str(cuda_error)}")
+            if not image_url:
+                return {"status_code": 400, "error": "image_url gerekli"}
             
             # Modeli yükle
-            try:
-                model = PanelDefectDetector(model_path=model_path)
-                print("Model başarıyla yüklendi")
-            except Exception as model_error:
-                print(f"Model yükleme hatası: {str(model_error)}")
-                traceback.print_exc()
-                return {"error": f"Model nesnesini oluşturma hatası: {str(model_error)}"}
-                
-        except Exception as model_setup_error:
-            error_msg = f"Model hazırlık hatası: {str(model_setup_error)}"
-            print(error_msg)
-            traceback.print_exc()
-            return {"error": error_msg}
-        
-        # Görüntüyü indir
-        print(f"Görüntü indiriliyor: {image_url}")
-        try:
-            downloaded_image_path = download_image(image_url)
-            print(f"Görüntü başarıyla indirildi: {downloaded_image_path}")
-        except Exception as e:
-            print(f"Görüntü indirme hatası: {str(e)}")
-            traceback.print_exc()
-            return {"error": f"Görüntü indirme hatası: {str(e)}"}
-        
-        # Görüntü boyutlarını al
-        img = Image.open(downloaded_image_path)
-        original_width, original_height = img.size
-        print(f"Görüntü boyutları: {original_width}x{original_height}")
-        
-        # Tüm tespitleri topla
-        all_detections = []
-        
-        # Dilim koordinatları varsa, her dilimi ayrı ayrı analiz et
-        if slice_coords and len(slice_coords) > 0:
-            print(f"Görüntü {len(slice_coords)} dilime ayrılacak")
+            model = load_model()
             
-            for slice_index, coords in enumerate(slice_coords):
-                # Koordinatları JSON'dan float alabilir, int'e çevir
-                coords = list(map(int, coords))
-                print(f"Dilim {slice_index}: {coords}")
+            # Görüntüyü indir
+            image = download_image(image_url)
+            
+            # Görüntü boyutları (hücre konumu hesaplama için)
+            img_width, img_height = image.size
+            
+            # Eğer slice koordinatları gönderilmişse kullan, yoksa varsayılan 2x2 grid oluştur
+            if not slice_coords:
+                print("Slice koordinatları bulunamadı, varsayılan grid oluşturuluyor (2x2)")
+                # Görüntüyü 4 bölgeye ayır (2x2 grid)
+                slice_coords = [
+                    [0, 0, img_width//2, img_height//2],             # Sol üst
+                    [img_width//2, 0, img_width, img_height//2],     # Sağ üst
+                    [0, img_height//2, img_width//2, img_height],    # Sol alt
+                    [img_width//2, img_height//2, img_width, img_height]  # Sağ alt
+                ]
+            else:
+                print(f"Gönderilen slice koordinatları kullanılıyor: {len(slice_coords)} dilim")
                 
-                # Dilimi kırp
-                slice_image = img.crop((coords[0], coords[1], coords[2], coords[3]))
-                
-                # Dilimi analiz et
-                print(f"Dilim {slice_index} analiz ediliyor...")
+            # Tüm tespitleri toplamak için liste
+            all_detections = []
+            
+            # Her dilimi ayrı ayrı işle
+            for i, coords in enumerate(slice_coords):
                 try:
-                    detections = model.detect_defects(slice_image)
-                    print(f"Dilim {slice_index} için {len(detections)} tespit yapıldı")
+                    # JSON'dan gelen koordinatlar float olabilir, int'e çevir
+                    x1, y1, x2, y2 = map(int, coords)
+                    print(f"Dilim #{i+1} işleniyor: ({x1}, {y1}, {x2}, {y2})")
                     
-                    # Koordinatları ana görüntüye göre düzelt
-                    for det in detections:
-                        # Orijinal görüntüde bbox koordinatları
-                        x1, y1, x2, y2 = det["bbox"]
-                        
-                        # Dilimin sol üst köşesine göre ayarla
-                        x1 += coords[0]
-                        y1 += coords[1]
-                        x2 += coords[0]
-                        y2 += coords[1]
-                        
-                        # Düzeltilmiş bbox'ı güncelle
-                        det["bbox"] = [x1, y1, x2, y2]
-                        
-                        # Dilim indeksini ve koordinatları ekle
-                        det["slice_index"] = slice_index
-                        det["slice_coords"] = coords
+                    # Dilimi kes
+                    image_slice = image.crop((x1, y1, x2, y2))
                     
-                    all_detections.extend(detections)
-                except Exception as e:
-                    print(f"Dilim {slice_index} analiz hatası: {str(e)}")
+                    # Dilimi analiz et
+                    slice_detections = model.detect_defects(image_slice)
+                    print(f"Dilim #{i+1}'de tespit edilen hata sayısı: {len(slice_detections)}")
+                    
+                    # Tespitleri ana görüntüye göre koordinat dönüşümü yap
+                    for detection in slice_detections:
+                        if "bbox" in detection:
+                            # Bounding box koordinatlarını al
+                            bbox = detection["bbox"]
+                            # Dilim koordinatlarına göre düzelt
+                            absolute_bbox = [
+                                bbox[0] + x1,  # x1
+                                bbox[1] + y1,  # y1
+                                bbox[2] + x1,  # x2
+                                bbox[3] + y1   # y2
+                            ]
+                            # Düzeltilmiş koordinatları güncelle
+                            detection["bbox"] = absolute_bbox
+                            detection["slice_index"] = i  # Dilim indeksi
+                            detection["slice_coords"] = coords  # Dilim koordinatları
+                    
+                    # Bu dilimdeki tespitleri ana listeye ekle
+                    all_detections.extend(slice_detections)
+                    
+                except Exception as slice_error:
+                    print(f"❌ Dilim #{i+1} işlenirken hata: {str(slice_error)}")
                     traceback.print_exc()
-        else:
-            # Tüm görüntüyü tek seferde analiz et
-            print("Tüm görüntü bir bütün olarak analiz ediliyor...")
-            try:
-                all_detections = model.detect_defects(img)
-                print(f"Toplam {len(all_detections)} tespit yapıldı")
-            except Exception as e:
-                print(f"Görüntü analiz hatası: {str(e)}")
-                traceback.print_exc()
-                return {"error": f"Görüntü analiz hatası: {str(e)}"}
-        
-        print(f"Toplam {len(all_detections)} tespit yapıldı")
-        
-        # Sınıf adlarını kontrol et - çeviri
-        class_names = ['hasarli-hucre', 'mikrocatlak', 'sicak-nokta']
-        class_name_mapping = {
-            'Microcrack': 'mikrocatlak',
-            'Hot Spot': 'sicak-nokta',
-            'Damaged Cell': 'hasarli-hucre',
-            'Cell': 'hasarli-hucre',
-            'Stain': 'sicak-nokta'
-        }
-        
-        for detection in all_detections:
-            # Sınıf adını düzelt
-            class_name = detection.get('class')
-            if class_name in class_name_mapping:
-                detection['class'] = class_name_mapping[class_name]
-                print(f"Sınıf adı {class_name} -> {detection['class']} olarak düzeltildi")
             
-            # Gerekli alanlar mevcutsa işlemi tamamla
-            if 'bbox' not in detection:
-                print(f"Hata: detection'da bbox bulunmuyor: {detection}")
-                continue
+            # Tespitleri kontrol et ve doğru sınıf adlarını kullan
+            class_names = [
+                'Soldering Error', 
+                'Ribbon Offset', 
+                'Crack', 
+                'Broken Cell', 
+                'Broken Finger', 
+                'SEoR', 
+                'Stain', 
+                'Microcrack', 
+                'Scratch'
+            ]
+            print(f"Toplam tespit edilen hata sayısı: {len(all_detections)}")
+            for i, defect in enumerate(all_detections):
+                # Orijinal sınıf ID'sini ve adını al
+                class_id = defect.get("class_id", 0)
+                current_class = defect.get("class", "unknown")
+                
+                # Sınıf ID'si varsa ve geçerliyse, doğru ismi kullan
+                if class_id is not None and 0 <= class_id < len(class_names):
+                    # Sınıf adını güncelle
+                    proper_class = class_names[class_id]
+                    if current_class != proper_class:
+                        print(f"  {i+1}. tespit: Sınıf düzeltiliyor: '{current_class}' -> '{proper_class}'")
+                        defect["class"] = proper_class
+                    else:
+                        print(f"  {i+1}. tespit: Sınıf '{current_class}' (doğru)")
+                else:
+                    print(f"  {i+1}. tespit: Geçersiz sınıf ID ({class_id}), sınıf '{current_class}' olarak kalıyor")
+                
+            # Görüntü boyutları (hücre konumu hesaplama için)
+            img_width, img_height = image.size
             
-            if not detection.get('class') and 'class_id' in detection:
-                class_id = detection['class_id']
-                if 0 <= class_id < len(class_names):
-                    detection['class'] = class_names[class_id]
-        
-        # Sonuçları döndür
-        result = {
-            "count": len(all_detections),
-            "detections": all_detections,
-            "image_id": image_id,
-            "project_id": project_id,
-            "image_dimensions": {
-                "width": original_width,
-                "height": original_height
-            },
-            "status_code": 200
-        }
-        
-        print(f"Sonuç döndürülüyor: {json.dumps(result)[:1000]}...")
-        return result
-        
-    except Exception as e:
-        print(f"İşlem sırasında beklenmeyen hata: {str(e)}")
-        traceback.print_exc()
-        return {"error": f"Beklenmeyen hata: {str(e)}"}
+            # Hata konumlarını hesapla
+            defects_with_positions = []
+            for defect in all_detections:
+                try:
+                    bbox = defect["bbox"]
+                    
+                    # Bounding box'ın merkez koordinatları
+                    center_x = (bbox[0] + bbox[2]) / 2
+                    center_y = (bbox[1] + bbox[3]) / 2
+                    
+                    # Hücre konumunu hesapla
+                    cell_position = determine_cell_position(center_x, center_y, img_width, img_height)
+                    
+                    # Sonuç nesnesini oluştur
+                    result = {
+                        "bbox": bbox,
+                        "confidence": defect["confidence"],
+                        "class": defect["class"],
+                        "class_id": defect.get("class_id", 0),  # Eğer yoksa varsayılan 0
+                        "cell_position": cell_position
+                    }
+                    
+                    defects_with_positions.append(result)
+                except Exception as e:
+                    print(f"Hata konumu hesaplanırken sorun: {str(e)}")
+                    traceback.print_exc()
+            
+            # Sonuç döndür
+            return {
+                "status_code": 200,
+                "project_id": project_id,
+                "image_id": image_id,
+                "image_dimensions": {"width": img_width, "height": img_height},
+                "detections": defects_with_positions,
+                "count": len(defects_with_positions)
+            }
+            
+        except requests.exceptions.Timeout:
+            print(f"⚠️ Timeout hatası oluştu (Deneme {current_try}/{max_retries+1})")
+            if current_try <= max_retries:
+                print(f"Yeniden deneniyor ({current_try}/{max_retries+1})...")
+                time.sleep(3)  # Biraz bekle ve tekrar dene
+                continue  # Döngünün başına dön
+            else:
+                print(f"❌ Maksimum deneme sayısına ulaşıldı, başarısız!")
+                return {"status_code": 500, "error": "Timeout hatası"}
+                
+        except Exception as e:
+            print(f"❌ İşlem sırasında hata: {str(e)}")
+            traceback.print_exc()
+            
+            if current_try <= max_retries:
+                print(f"Yeniden deneniyor ({current_try}/{max_retries+1})...")
+                time.sleep(2)  # Biraz bekle ve tekrar dene
+                continue  # Döngünün başına dön
+            
+            return {"status_code": 500, "error": str(e)}
+    
+    # Tüm denemeler başarısız oldu
+    return {"status_code": 500, "error": "Maksimum yeniden deneme sayısına ulaşıldı"}
 
 # RunPod API'yi başlat
 print("=" * 70)
