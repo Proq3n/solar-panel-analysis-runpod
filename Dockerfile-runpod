@@ -13,20 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libgl1-mesa-glx \
     libglib2.0-0 \
-    python3-dev \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Python bağımlılıklarını yükle
-RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
-# RunPod API
-RUN pip3 install --no-cache-dir runpod==0.13.0
-# Temel veri işleme 
-RUN pip3 install --no-cache-dir numpy pillow
-# Görüntü işleme
-RUN pip3 install --no-cache-dir opencv-python-headless
-# Eksik modül: ultralytics (YOLO için gerekli)
-RUN pip3 install --no-cache-dir ultralytics==8.0.20
+# Python bağımlılıklarını en basit şekilde yükle
+RUN pip install --upgrade pip && \
+    pip install runpod && \
+    pip install ultralytics && \
+    pip install opencv-python-headless numpy pillow
 
 # Uygulama dosyalarını kopyala
 COPY handler.py model.py utils.py /app/
@@ -41,7 +34,7 @@ set -e \n\
 # Sistem bilgilerini göster \n\
 echo "==== SİSTEM BİLGİLERİ ====" \n\
 python3 --version \n\
-pip3 list | grep -e torch -e numpy -e ultra -e opencv \n\
+pip list | grep -e torch -e numpy -e ultra -e opencv \n\
 \n\
 # Modeli indir \n\
 if [ ! -f ${MODEL_PATH} ]; then \n\
@@ -55,10 +48,6 @@ if [ ! -f ${MODEL_PATH} ]; then \n\
     \n\
     echo "Model başarıyla indirildi: $(du -h ${MODEL_PATH})" \n\
 fi \n\
-\n\
-# Modeli test et \n\
-echo "Modeli test ediyorum..." \n\
-python3 -c "import torch; import ultralytics; m = torch.load(\"${MODEL_PATH}\", map_location=\"cpu\"); print(f\"Model tipi: {type(m)}\")" || echo "Model testi başarısız!" \n\
 \n\
 # Uygulamayı başlat \n\
 echo "RunPod API başlatılıyor..." \n\
