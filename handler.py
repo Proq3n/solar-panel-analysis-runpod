@@ -82,7 +82,7 @@ def load_model():
 
 def handler(event):
     try:
-        print(f"Gelen istek: {event}")
+        print(f"İşlem başlatıldı. Gelen istek: {event}")
         
         # İsteği doğrula
         input_data = event.get("input", {})
@@ -100,18 +100,27 @@ def handler(event):
         
         # Modeli yükle - Dockerfile'da tanımlanan model_path ile uyumlu olmalı
         try:
-            print("Model yükleniyor...")
-            # Dockerfile'da tanımlanan ortam değişkeni veya varsayılan değer
+            # MODEL_PATH ortam değişkenini kontrol et - bu, Dockerfile'da tanımlanmıştır
             model_path = os.environ.get("MODEL_PATH", "/app/models/model.pt")
-            print(f"Model yolu: {model_path}")
+            
+            if not os.path.exists(model_path):
+                error_msg = f"HATA: Model dosyası bulunamadı: {model_path}"
+                print(error_msg)
+                # Mevcut dizin içeriğini listele - debug için
+                print(f"Mevcut dizin (/app/) içeriği: {os.listdir('/app/')}")
+                print(f"Models dizini içeriği: {os.listdir('/app/models/') if os.path.exists('/app/models/') else 'Models dizini bulunamadı'}")
+                return {"error": error_msg}
+                
+            print(f"Model yükleniyor: {model_path}")
             
             # Modeli başlatırken model_path parametresini sağla
             model = PanelDefectDetector(model_path=model_path)
             print("Model başarıyla yüklendi")
         except Exception as model_error:
-            print(f"Model yükleme hatası: {str(model_error)}")
+            error_msg = f"Model yükleme hatası: {str(model_error)}"
+            print(error_msg)
             traceback.print_exc()
-            return {"error": f"Model yükleme hatası: {str(model_error)}"}
+            return {"error": error_msg}
         
         # Görüntüyü indir
         print(f"Görüntü indiriliyor: {image_url}")
