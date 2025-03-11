@@ -30,60 +30,59 @@ COPY handler.py model.py utils.py /app/
 # Model dizinini oluştur
 RUN mkdir -p /app/models
 
-# Başlangıç scripti oluştur - ayrı bir dosya olarak
-RUN echo '#!/bin/bash
-set -e
-
-echo "==== SİSTEM BİLGİLERİ ===="
-python --version
-pip list | grep -e torch -e numpy -e ultra -e opencv -e psutil
-nvidia-smi || echo "nvidia-smi bulunamadı"
-
-if [ ! -f ${MODEL_PATH} ]; then
-    echo "Model yok, GitHub'"'"'dan 2712.pt indiriliyor: ${MODEL_PATH}"
-    mkdir -p /app/models
-    
-    # Doğru GitHub linkini kullan: main dalı
-    if wget -q -O ${MODEL_PATH} https://github.com/Proq3n/solar-panel-analysis-runpod/raw/main/2712.pt; then
-        echo "Model başarıyla indirildi (GitHub 2712.pt): $(du -h ${MODEL_PATH})"
-        echo "Model içeriği kontrolü (ilk birkaç bayt): $(hexdump -n 32 -C ${MODEL_PATH} | head -n 2)"
-    else
-        echo "HATA: GitHub'"'"'dan 2712.pt indirme başarısız."
-        echo "Link: https://github.com/Proq3n/solar-panel-analysis-runpod/raw/main/2712.pt"
-        echo "Wget durumu: $?"
-        echo "Sistem kontrolü:"
-        df -h
-        echo "Disk alanı yetersiz olabilir veya GitHub erişimi engellenmiş olabilir."
-        echo "Model indirilemedi veya dosya boş."
-        exit 1
-    fi
-else
-    echo "Model zaten mevcut: ${MODEL_PATH}"
-    ls -la ${MODEL_PATH}
-fi
-
-# Model erişim iznini kontrol et ve model dosyasının geçerli olduğunu doğrula
-if [ -f ${MODEL_PATH} ]; then
-    chmod 644 ${MODEL_PATH}
-    echo "Model dosyası izinleri güncellendi: $(ls -la ${MODEL_PATH})"
-    
-    # Model dosyasının boyut kontrolü
-    MODEL_SIZE=$(stat -c%s "${MODEL_PATH}")
-    if [ "${MODEL_SIZE}" -lt 10000 ]; then
-        echo "UYARI: Model dosyası çok küçük (${MODEL_SIZE} byte), geçerli bir model olmayabilir."
-        echo "İçerik kontrolü:"
-        hexdump -n 100 -C ${MODEL_PATH}
-    else
-        echo "Model dosyası boyutu makul görünüyor: ${MODEL_SIZE} byte"
-    fi
-fi
-
-echo "RunPod API başlatılıyor (GPU modu)..."
-exec python -u handler.py
-' > /app/start.sh
-
-# Başlangıç scriptini çalıştırılabilir yap
-RUN chmod +x /app/start.sh
+# Başlangıç scripti oluştur
+RUN echo '#!/bin/bash' > /app/start.sh \
+    && echo 'set -e' >> /app/start.sh \
+    && echo '' >> /app/start.sh \
+    && echo '# Sistem bilgisi göster' >> /app/start.sh \
+    && echo 'echo "==== SİSTEM BİLGİLERİ ===="' >> /app/start.sh \
+    && echo 'python --version' >> /app/start.sh \
+    && echo 'pip list | grep -e torch -e numpy -e ultra -e opencv -e psutil' >> /app/start.sh \
+    && echo 'nvidia-smi || echo "nvidia-smi bulunamadı"' >> /app/start.sh \
+    && echo '' >> /app/start.sh \
+    && echo '# Model indirme veya kontrol etme' >> /app/start.sh \
+    && echo 'if [ ! -f ${MODEL_PATH} ]; then' >> /app/start.sh \
+    && echo '    echo "Model yok, GitHub'"'"'dan 2712.pt indiriliyor: ${MODEL_PATH}"' >> /app/start.sh \
+    && echo '    mkdir -p /app/models' >> /app/start.sh \
+    && echo '' >> /app/start.sh \
+    && echo '    # GitHub'"'"'dan modeli indir' >> /app/start.sh \
+    && echo '    if wget -q -O ${MODEL_PATH} https://github.com/Proq3n/solar-panel-analysis-runpod/raw/main/2712.pt; then' >> /app/start.sh \
+    && echo '        echo "Model başarıyla indirildi (GitHub 2712.pt): $(du -h ${MODEL_PATH})"' >> /app/start.sh \
+    && echo '        echo "Model içeriği kontrolü (ilk birkaç bayt): $(hexdump -n 32 -C ${MODEL_PATH} | head -n 2)"' >> /app/start.sh \
+    && echo '    else' >> /app/start.sh \
+    && echo '        echo "HATA: GitHub'"'"'dan 2712.pt indirme başarısız."' >> /app/start.sh \
+    && echo '        echo "Link: https://github.com/Proq3n/solar-panel-analysis-runpod/raw/main/2712.pt"' >> /app/start.sh \
+    && echo '        echo "Wget durumu: $?"' >> /app/start.sh \
+    && echo '        echo "Sistem kontrolü:"' >> /app/start.sh \
+    && echo '        df -h' >> /app/start.sh \
+    && echo '        echo "Disk alanı yetersiz olabilir veya GitHub erişimi engellenmiş olabilir."' >> /app/start.sh \
+    && echo '        echo "Model indirilemedi veya dosya boş."' >> /app/start.sh \
+    && echo '        exit 1' >> /app/start.sh \
+    && echo '    fi' >> /app/start.sh \
+    && echo 'else' >> /app/start.sh \
+    && echo '    echo "Model zaten mevcut: ${MODEL_PATH}"' >> /app/start.sh \
+    && echo '    ls -la ${MODEL_PATH}' >> /app/start.sh \
+    && echo 'fi' >> /app/start.sh \
+    && echo '' >> /app/start.sh \
+    && echo '# Model dosyasını kontrol et' >> /app/start.sh \
+    && echo 'if [ -f ${MODEL_PATH} ]; then' >> /app/start.sh \
+    && echo '    chmod 644 ${MODEL_PATH}' >> /app/start.sh \
+    && echo '    echo "Model dosyası izinleri güncellendi: $(ls -la ${MODEL_PATH})"' >> /app/start.sh \
+    && echo '' >> /app/start.sh \
+    && echo '    # Model boyutu kontrolü' >> /app/start.sh \
+    && echo '    MODEL_SIZE=$(stat -c%s "${MODEL_PATH}")' >> /app/start.sh \
+    && echo '    if [ "${MODEL_SIZE}" -lt 10000 ]; then' >> /app/start.sh \
+    && echo '        echo "UYARI: Model dosyası çok küçük (${MODEL_SIZE} byte), geçerli bir model olmayabilir."' >> /app/start.sh \
+    && echo '        echo "İçerik kontrolü:"' >> /app/start.sh \
+    && echo '        hexdump -n 100 -C ${MODEL_PATH}' >> /app/start.sh \
+    && echo '    else' >> /app/start.sh \
+    && echo '        echo "Model dosyası boyutu makul görünüyor: ${MODEL_SIZE} byte"' >> /app/start.sh \
+    && echo '    fi' >> /app/start.sh \
+    && echo 'fi' >> /app/start.sh \
+    && echo '' >> /app/start.sh \
+    && echo 'echo "RunPod API başlatılıyor (GPU modu)..."' >> /app/start.sh \
+    && echo 'exec python -u handler.py' >> /app/start.sh \
+    && chmod +x /app/start.sh
 
 # Başlangıç komutu 
 CMD ["/bin/bash", "/app/start.sh"] 
